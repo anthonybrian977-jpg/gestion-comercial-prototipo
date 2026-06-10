@@ -27,7 +27,7 @@ create table if not exists public.products (
   model text,
   category text,
   description text,
-  main_sku text,
+  main_sku text unique,
   image_url text,
   has_variants boolean not null default false,
   status text not null default 'active',
