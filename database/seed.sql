@@ -36,7 +36,7 @@ insert into public.products (
   category,
   description,
   main_sku,
-  image_url,
+  image_path,
   has_variants,
   status
 )
@@ -92,7 +92,7 @@ set
   model = excluded.model,
   category = excluded.category,
   description = excluded.description,
-  image_url = excluded.image_url,
+  image_path = excluded.image_path,
   has_variants = excluded.has_variants,
   status = excluded.status,
   updated_at = now();

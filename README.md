@@ -1,23 +1,33 @@
 # Gestión Comercial Prototipo
 
-Prototipo de sistema ERP comercial orientado a una prueba técnica. Permite autenticación de usuarios, visualización de un dashboard gerencial con métricas de inventario y navegación hacia módulos comerciales en desarrollo.
+Prototipo de sistema ERP comercial orientado a una prueba técnica. Cubre autenticación, dashboard gerencial con métricas de inventario y un Maestro de Productos con creación, edición, variantes e imágenes.
 
 ## Stack tecnológico
 
-- **Next.js 15** (App Router)
-- **TypeScript**
-- **Tailwind CSS**
-- **Supabase PostgreSQL**
+- **Next.js 15** (App Router, Server + Client Components)
+- **TypeScript** estricto
+- **Tailwind CSS v4**
+- **Supabase** — PostgreSQL + Auth + Storage
 - **Vercel** como opción de despliegue
 
 ## Módulos implementados
 
-- Login con Supabase Auth (`signInWithPassword`)
-- Dashboard Gerencial (métricas desde Supabase)
-- Maestro de Productos (solo lectura)
-- Conexión Supabase SSR (`@supabase/ssr`, cookies)
+| Módulo | Estado | Funcionalidades |
+|--------|--------|-----------------|
+| Login | ✅ | Supabase Auth `signInWithPassword`, sesión por cookies |
+| Dashboard Gerencial | ✅ | Métricas de inventario desde Supabase (Server Component) |
+| Maestro de Productos | ✅ | Catálogo, creación, edición, variantes, imágenes, lightbox |
 
-## Módulos en desarrollo
+### Maestro de Productos — detalle
+
+- **Tabla** con búsqueda por nombre, SKU, marca o categoría; alerta visual de stock bajo
+- **Crear producto** — producto base + variantes con stock, precios e imagen inicial
+- **Modal de detalle / edición compacto** — vista y edición en el mismo modal
+- **Variantes** — productos simples y con variantes; conversión simple → multi-variante desde edición
+- **Imágenes** — subida a Supabase Storage bucket `product-images`; se guarda `image_path` (path interno); URL pública solo se genera al renderizar
+- **Lightbox** — clic en miniatura de producto o variante abre vista ampliada
+
+## Módulos en desarrollo (placeholders)
 
 - Orden de Compra
 - Ingreso de Mercadería
@@ -40,7 +50,7 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 ```
 
-> Usa la **Publishable Key** (anon) de Supabase. No incluyas secret keys en el frontend.
+> Usa la **Publishable Key** (anon key) de Supabase. No incluyas secret keys en el frontend.
 
 ## Ejecución local
 
@@ -53,63 +63,91 @@ Abre [http://localhost:3000/login](http://localhost:3000/login).
 
 ## Base de datos (Supabase)
 
-Scripts SQL incluidos en `database/`:
+Scripts SQL en `database/`:
 
-1. `database/schema.sql` — extensión, tablas (`app_users`, `products`, `product_variants`) y función `login_app_user`
-2. `database/seed.sql` — usuario admin demo y catálogo inicial:
+1. `schema.sql` — tablas, RLS y comentarios sobre Storage
+2. `seed.sql` — usuario admin demo + catálogo inicial de 4 productos
 
-   **Productos**
+Ejecutar en orden en el SQL Editor de Supabase:
 
-   | Producto | main_sku |
-   |----------|----------|
-   | Alien Mugler | AUTO-ALIEN-MUGLER |
-   | Teclado Redragon K552 | AUTO-REDRAGON-K552 |
-   | Laptop Lenovo IdeaPad 3 | AUTO-LENOVO-IP3 |
-   | Polo Naruto Asesino | AUTO-POLO-NARUTO |
+```
+1. schema.sql
+2. seed.sql
+```
 
-   **Variantes:** AM-50ML-001, AM-100ML-002, TEC-K552-NEGRO, TEC-K552-ROJO, TEC-K552-BLANCO, LAP-LEN-IP3-R5, LAP-LEN-IP3-I5, POL-NARUTO-PRINCIPAL
+### Tablas principales
 
-Ejecuta primero `schema.sql` y luego `seed.sql` en el SQL Editor de Supabase.
+| Tabla | Descripción |
+|-------|-------------|
+| `app_users` | Usuarios de negocio vinculados a Supabase Auth via `auth_user_id` |
+| `products` | Producto base (nombre, marca, SKU, `image_path`) |
+| `product_variants` | Variantes vendibles (SKU, precio, stock, `image_path`) |
+
+### Supabase Storage
+
+- Bucket: `product-images` (público)
+- Crear desde el panel: **Storage → New bucket → Public = true**
+- Ejecutar las policies comentadas en `schema.sql`
+- `image_path` almacena el path interno (ej. `products/uuid.webp`); la URL pública se construye en frontend con `getProductImagePublicUrl(path)`
+
+### Catálogo seed
+
+| Producto | main_sku | Tipo |
+|----------|----------|------|
+| Alien Mugler | AUTO-ALIEN-MUGLER | Con variantes (50ml, 100ml) |
+| Teclado Redragon K552 | AUTO-REDRAGON-K552 | Con variantes (color/switch) |
+| Laptop Lenovo IdeaPad 3 | AUTO-LENOVO-IP3 | Con variantes (CPU/RAM) |
+| Polo Naruto Asesino | AUTO-POLO-NARUTO | Simple |
 
 ## Arquitectura (resumen)
 
 ```
 src/
 ├── app/
-│   ├── (auth)/login/          # Pantalla de login
-│   └── (dashboard)/           # Layout ERP + rutas protegidas
+│   ├── (auth)/login/           # Pantalla de login
+│   └── (dashboard)/            # Layout ERP + rutas protegidas
 ├── components/
-│   ├── layout/                # Sidebar, Header, AuthGuard
-│   ├── dashboard/             # KPIs y alertas
-│   └── ui/                    # Placeholders de módulos
+│   ├── layout/                 # Sidebar, Header, AuthGuard
+│   ├── dashboard/              # KPIs y alertas de inventario
+│   └── ui/
+│       └── ImageLightbox.tsx   # Visor de imagen reutilizable
 ├── lib/
-│   ├── auth/profile.ts        # Perfil desde app_users (auth_user_id)
-│   ├── navigation.ts          # Navegación del sidebar
+│   ├── auth/                   # Perfil desde app_users
+│   ├── navigation.ts           # Navegación del sidebar
 │   └── supabase/
-│       ├── client.ts          # createBrowserClient (Client Components)
-│       └── server.ts          # createServerClient (Server Components)
-├── middleware.ts              # Refresco de sesión Supabase Auth
+│       ├── client.ts           # createBrowserClient (Client Components)
+│       ├── server.ts           # createServerClient (Server Components)
+│       └── upload-image.ts     # Subida a Storage + getProductImagePublicUrl
+├── middleware.ts               # Refresco de sesión Supabase Auth
 └── modules/
-    ├── auth/services/         # loginAppUser (legado, no flujo principal)
-    ├── dashboard/services/  # getDashboardMetrics
-    └── productos/services/    # getProductsCatalog
+    ├── auth/services/          # loginAppUser (legado)
+    ├── dashboard/services/     # getDashboardMetrics
+    └── productos/
+        ├── actions/
+        │   ├── create-product.ts   # Server Action: crear producto + variantes
+        │   └── update-product.ts   # Server Action: editar producto + variantes
+        ├── components/
+        │   ├── ProductTable.tsx        # Tabla con búsqueda y lightbox
+        │   ├── ProductCreateModal.tsx  # Modal creación
+        │   └── ProductDetailModal.tsx  # Modal detalle/edición compacto
+        ├── services/products.ts    # getProductsCatalog (Server Component)
+        ├── types.ts                # Tipos TypeScript del módulo
+        └── utils/                  # format, sku
 ```
-
-- **Frontend:** Next.js App Router con Server Components para métricas/catálogo y Client Components para login/logout.
-- **Backend de datos:** Supabase PostgreSQL expuesto vía `@supabase/ssr`.
-- **Autenticación:** Supabase Auth con cookies; perfil de usuario desde `app_users.auth_user_id`.
 
 ## Supuestos del prototipo
 
-- El catálogo se modela con `products` (familia) y `product_variants` (SKU/stock).
+- `products` es el agrupador/ficha; `product_variants` son las unidades vendibles con SKU y stock.
+- `has_variants` se recalcula automáticamente al guardar edición (> 1 variante activa = true).
+- Las imágenes se suben al bucket antes de persistir el producto; si la inserción en BD falla posteriormente, puede quedar un archivo huérfano en Storage (limitación aceptable en prototipo).
+- `updateProduct` aplica cambios en pasos secuenciales (producto → variantes → nuevas variantes). En un ERP real esto debería ejecutarse en una transacción PostgreSQL o RPC.
 - Las métricas del dashboard leen únicamente variantes con `status = 'active'`.
-- Stock bajo se calcula cuando `stock <= min_stock`.
-- Los módulos comerciales restantes están como placeholders visuales.
-- No hay integraciones externas (facturación SUNAT, logística, etc.) en esta fase.
+- Stock bajo: `stock <= min_stock`.
+- No hay integraciones externas (SUNAT, logística, etc.) en esta fase.
 
 ## Nota de seguridad
 
-La sesión usa **Supabase Auth** con cookies gestionadas por `@supabase/ssr`. Las consultas a tablas de negocio deben estar protegidas con **RLS** para usuarios `authenticated`. La función RPC `login_app_user` permanece en el esquema SQL como legado, pero no forma parte del flujo de login de la app.
+La sesión usa **Supabase Auth** con cookies gestionadas por `@supabase/ssr`. Las tablas de negocio están protegidas con **RLS**: solo usuarios `authenticated` con `role = 'admin'` en `app_users` pueden insertar/actualizar/eliminar. La función RPC `login_app_user` permanece en el esquema como legado pero no forma parte del flujo de login principal.
 
 ## Scripts disponibles
 
