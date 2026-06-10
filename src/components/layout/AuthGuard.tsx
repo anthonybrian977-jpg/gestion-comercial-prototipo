@@ -2,18 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/client";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.replace("/login");
-      return;
-    }
-    setReady(true);
+    const supabase = createClient();
+
+    supabase.auth.getUser().then(({ data: { user }, error }) => {
+      if (error || !user) {
+        router.replace("/login");
+        return;
+      }
+      setReady(true);
+    });
   }, [router]);
 
   if (!ready) {

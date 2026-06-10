@@ -68,8 +68,8 @@ function mapLowStockAlerts(variants: ProductVariantRow[]): InventoryAlert[] {
 }
 
 export async function getDashboardMetrics(): Promise<DashboardMetricsResult> {
-  const { createSupabaseClient } = await import("@/lib/supabase/client");
-  const supabase = createSupabaseClient();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
 
   const [
     activeProductsResult,

@@ -12,13 +12,13 @@ Prototipo de sistema ERP comercial orientado a una prueba técnica. Permite aute
 
 ## Módulos implementados
 
-- Login básico (RPC `login_app_user`)
+- Login con Supabase Auth (`signInWithPassword`)
 - Dashboard Gerencial (métricas desde Supabase)
-- Conexión Supabase (cliente público)
+- Maestro de Productos (solo lectura)
+- Conexión Supabase SSR (`@supabase/ssr`, cookies)
 
 ## Módulos en desarrollo
 
-- Maestro de Productos
 - Orden de Compra
 - Ingreso de Mercadería
 - Facturación
@@ -83,17 +83,21 @@ src/
 │   ├── dashboard/             # KPIs y alertas
 │   └── ui/                    # Placeholders de módulos
 ├── lib/
-│   ├── auth/session.ts        # Sesión en localStorage (prototipo)
+│   ├── auth/profile.ts        # Perfil desde app_users (auth_user_id)
 │   ├── navigation.ts          # Navegación del sidebar
-│   └── supabase/client.ts     # Cliente Supabase
+│   └── supabase/
+│       ├── client.ts          # createBrowserClient (Client Components)
+│       └── server.ts          # createServerClient (Server Components)
+├── middleware.ts              # Refresco de sesión Supabase Auth
 └── modules/
-    ├── auth/services/         # loginAppUser → RPC
-    └── dashboard/services/    # getDashboardMetrics
+    ├── auth/services/         # loginAppUser (legado, no flujo principal)
+    ├── dashboard/services/  # getDashboardMetrics
+    └── productos/services/    # getProductsCatalog
 ```
 
-- **Frontend:** Next.js App Router con componentes de servidor para métricas y client components para login/sesión.
-- **Backend de datos:** Supabase PostgreSQL expuesto vía `@supabase/supabase-js`.
-- **Autenticación:** validación por función RPC; sesión persistida en `localStorage` solo para alcance del prototipo.
+- **Frontend:** Next.js App Router con Server Components para métricas/catálogo y Client Components para login/logout.
+- **Backend de datos:** Supabase PostgreSQL expuesto vía `@supabase/ssr`.
+- **Autenticación:** Supabase Auth con cookies; perfil de usuario desde `app_users.auth_user_id`.
 
 ## Supuestos del prototipo
 
@@ -105,7 +109,7 @@ src/
 
 ## Nota de seguridad
 
-La sesión actual usa **localStorage** solo por alcance de prototipo. En producción se recomienda **Supabase Auth** con cookies seguras, políticas RLS estrictas y sin exponer lógica de contraseñas en el cliente.
+La sesión usa **Supabase Auth** con cookies gestionadas por `@supabase/ssr`. Las consultas a tablas de negocio deben estar protegidas con **RLS** para usuarios `authenticated`. La función RPC `login_app_user` permanece en el esquema SQL como legado, pero no forma parte del flujo de login de la app.
 
 ## Scripts disponibles
 

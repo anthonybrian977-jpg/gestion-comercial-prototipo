@@ -2,8 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAuthenticated, setDemoSession } from "@/lib/auth/session";
-import { loginAppUser } from "@/modules/auth/services/login";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,9 +12,13 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated()) {
-      router.replace("/");
-    }
+    const supabase = createClient();
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        router.replace("/");
+      }
+    });
   }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -24,15 +27,19 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const result = await loginAppUser(email, password);
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-      if (!result.success) {
-        setError(result.message);
+      if (signInError) {
+        setError("Credenciales incorrectas o usuario inactivo");
         setLoading(false);
         return;
       }
 
-      setDemoSession(result.session);
+      router.refresh();
       router.push("/");
     } catch {
       setError("Credenciales incorrectas o usuario inactivo");

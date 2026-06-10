@@ -1,25 +1,23 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { clearDemoSession, getDemoSession } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/client";
+import { useUserProfile } from "@/components/layout/UserProfileProvider";
 
 type HeaderProps = {
   title: string;
   subtitle?: string;
 };
 
-function formatRole(role: string): string {
-  if (role.toLowerCase() === "admin") return "Administrador";
-  return role;
-}
-
 export function Header({ title, subtitle }: HeaderProps) {
   const router = useRouter();
-  const session = getDemoSession();
+  const profile = useUserProfile();
 
-  function handleLogout() {
-    clearDemoSession();
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
     router.push("/login");
+    router.refresh();
   }
 
   return (
@@ -38,14 +36,12 @@ export function Header({ title, subtitle }: HeaderProps) {
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
-          <div className="hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-right md:block">
-            <p className="text-sm font-medium text-slate-900">
-              {session?.name ?? "Admin Demo"}
-            </p>
-            <p className="text-xs text-slate-500">
-              {formatRole(session?.role ?? "Administrador")}
-            </p>
-          </div>
+          {profile ? (
+            <div className="hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-right md:block">
+              <p className="text-sm font-medium text-slate-900">{profile.name}</p>
+              <p className="text-xs text-slate-500">{profile.role}</p>
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={handleLogout}

@@ -1,5 +1,5 @@
 -- Gestión Comercial Prototipo
--- Esquema alineado con Supabase (sin RLS)
+-- Esquema alineado con Supabase (RLS para usuarios autenticados)
 
 create extension if not exists pgcrypto;
 
@@ -13,9 +13,13 @@ create table if not exists public.app_users (
   name text not null,
   role text not null default 'admin',
   is_active boolean not null default true,
+  auth_user_id uuid unique references auth.users (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.app_users
+  add column if not exists auth_user_id uuid unique references auth.users (id) on delete set null;
 
 -- ---------------------------------------------------------------------------
 -- Tabla: products
@@ -55,7 +59,7 @@ create table if not exists public.product_variants (
 );
 
 -- ---------------------------------------------------------------------------
--- Función: login_app_user
+-- Función: login_app_user (legado; el login actual usa Supabase Auth)
 -- ---------------------------------------------------------------------------
 create or replace function public.login_app_user(
   input_email text,
@@ -86,3 +90,42 @@ end;
 $$;
 
 grant execute on function public.login_app_user(text, text) to anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- RLS: app_users
+-- ---------------------------------------------------------------------------
+alter table public.app_users enable row level security;
+
+drop policy if exists users_read_own_profile on public.app_users;
+
+create policy users_read_own_profile
+  on public.app_users
+  for select
+  to authenticated
+  using (auth.uid() = auth_user_id);
+
+-- ---------------------------------------------------------------------------
+-- RLS: products
+-- ---------------------------------------------------------------------------
+alter table public.products enable row level security;
+
+drop policy if exists authenticated_read_products on public.products;
+
+create policy authenticated_read_products
+  on public.products
+  for select
+  to authenticated
+  using (true);
+
+-- ---------------------------------------------------------------------------
+-- RLS: product_variants
+-- ---------------------------------------------------------------------------
+alter table public.product_variants enable row level security;
+
+drop policy if exists authenticated_read_product_variants on public.product_variants;
+
+create policy authenticated_read_product_variants
+  on public.product_variants
+  for select
+  to authenticated
+  using (true);

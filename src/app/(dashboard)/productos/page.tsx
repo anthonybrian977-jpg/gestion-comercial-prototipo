@@ -1,16 +1,16 @@
 import { DashboardPageShell } from "@/components/layout/DashboardPageShell";
-import { PagePlaceholder } from "@/components/ui/PagePlaceholder";
+import { ProductTable } from "@/modules/productos/components/ProductTable";
+import { getProductsCatalog } from "@/modules/productos/services/products";
 
-export default function ProductosPage() {
+export default async function ProductosPage() {
+  const products = await getProductsCatalog();
+
   return (
     <DashboardPageShell
       title="Maestro de Productos"
-      subtitle="Catálogo y gestión de productos"
+      subtitle="Catálogo base de productos, variantes, precios y stock disponible."
     >
-      <PagePlaceholder
-        title="Maestro de Productos"
-        description="Este módulo se implementará en una fase posterior."
-      />
+      <ProductTable products={products} />
     </DashboardPageShell>
   );
 }

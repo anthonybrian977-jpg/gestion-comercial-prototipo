@@ -237,3 +237,13 @@ set
   min_stock = excluded.min_stock,
   status = excluded.status,
   updated_at = now();
+
+-- ---------------------------------------------------------------------------
+-- Vincular app_users con Supabase Auth
+-- Ejecutar después de crear el usuario admin@demo.com en Supabase Auth.
+-- ---------------------------------------------------------------------------
+update public.app_users au
+set auth_user_id = u.id
+from auth.users u
+where au.email = u.email
+  and au.email = 'admin@demo.com';

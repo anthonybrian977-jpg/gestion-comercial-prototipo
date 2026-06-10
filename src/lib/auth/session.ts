@@ -1,3 +1,8 @@
+/**
+ * @deprecated Sesión demo en localStorage. No usar en el flujo principal.
+ * La autenticación actual usa Supabase Auth con cookies (@supabase/ssr).
+ */
+
 export const AUTH_STORAGE_KEY = "gcp-demo-session";
 
 export type DemoSession = {

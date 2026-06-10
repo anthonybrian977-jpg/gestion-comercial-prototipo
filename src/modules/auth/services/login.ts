@@ -1,4 +1,8 @@
-import { createSupabaseClient } from "@/lib/supabase/client";
+/**
+ * @deprecated Flujo legado vía RPC login_app_user.
+ * El login principal usa supabase.auth.signInWithPassword en la pantalla /login.
+ */
+import { createClient } from "@/lib/supabase/client";
 import type { DemoSession } from "@/lib/auth/session";
 
 type LoginRpcRow = {
@@ -40,7 +44,7 @@ export async function loginAppUser(
   email: string,
   password: string,
 ): Promise<LoginResult> {
-  const supabase = createSupabaseClient();
+  const supabase = createClient();
 
   const { data, error } = await supabase.rpc("login_app_user", {
     input_email: email.trim(),
