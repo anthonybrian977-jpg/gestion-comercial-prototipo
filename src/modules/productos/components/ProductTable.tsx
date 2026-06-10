@@ -114,7 +114,6 @@ export function ProductTable({ products }: ProductTableProps) {
                 <tr>
                   {[
                     "Producto",
-                    "SKU principal",
                     "Categoría",
                     "Marca",
                     "Precio desde",
@@ -161,9 +160,6 @@ export function ProductTable({ products }: ProductTableProps) {
                           ) : null}
                         </div>
                       </div>
-                    </td>
-                    <td className="px-4 py-4 text-sm text-slate-600">
-                      {product.main_sku ?? "—"}
                     </td>
                     <td className="px-4 py-4 text-sm text-slate-600">
                       {product.category ?? "—"}

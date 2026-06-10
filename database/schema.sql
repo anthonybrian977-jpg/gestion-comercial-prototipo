@@ -32,7 +32,7 @@ create table if not exists public.products (
   category text,
   description text,
   main_sku text unique,
-  image_url text,
+  image_path text,
   has_variants boolean not null default false,
   status text not null default 'active',
   created_at timestamptz not null default now(),
@@ -92,8 +92,11 @@ $$;
 grant execute on function public.login_app_user(text, text) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- Columnas de imagen (agregar si no existen)
--- Nota: usamos image_path (public URL de Supabase Storage bucket product-images)
+-- Columnas de imagen (agregar si no existen en BD existente)
+-- Nota: image_path guarda el PATH INTERNO del bucket product-images.
+-- Ej: "products/uuid.webp" o "variants/uuid.webp"
+-- La URL pública se genera solo al renderizar con getProductImagePublicUrl().
+-- NO se guarda la URL completa de Supabase en la BD.
 -- ---------------------------------------------------------------------------
 alter table public.products
   add column if not exists image_path text;
