@@ -6,8 +6,10 @@ import {
   formatCurrency,
   formatNumber,
 } from "@/modules/productos/utils/format";
-import { ProductVariantsModal } from "@/modules/productos/components/ProductVariantsModal";
+import { ProductDetailModal } from "@/modules/productos/components/ProductDetailModal";
 import { ProductCreateModal } from "@/modules/productos/components/ProductCreateModal";
+import { getProductImagePublicUrl } from "@/lib/supabase/upload-image";
+import { ImageLightbox } from "@/components/ui/ImageLightbox";
 
 type ProductTableProps = {
   products: ProductListItem[];
@@ -46,10 +48,9 @@ function matchesSearch(product: ProductListItem, query: string): boolean {
 
 export function ProductTable({ products }: ProductTableProps) {
   const [search, setSearch] = useState("");
-  const [selectedProduct, setSelectedProduct] = useState<ProductListItem | null>(
-    null,
-  );
+  const [detailProduct, setDetailProduct] = useState<ProductListItem | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const filteredProducts = useMemo(
     () => products.filter((product) => matchesSearch(product, search)),
@@ -138,12 +139,28 @@ export function ProductTable({ products }: ProductTableProps) {
                     className={product.hasLowStock ? "bg-rose-50/40" : undefined}
                   >
                     <td className="px-4 py-4">
-                      <p className="text-sm font-medium text-slate-900">
-                        {product.name}
-                      </p>
-                      {product.model ? (
-                        <p className="mt-0.5 text-xs text-slate-500">{product.model}</p>
-                      ) : null}
+                      <div className="flex items-center gap-3">
+                        {getProductImagePublicUrl(product.image_path) ? (
+                          <img
+                            src={getProductImagePublicUrl(product.image_path)!}
+                            alt=""
+                            className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-slate-100 object-cover transition hover:opacity-80"
+                            onClick={() =>
+                              setLightboxSrc(
+                                getProductImagePublicUrl(product.image_path),
+                              )
+                            }
+                          />
+                        ) : null}
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">
+                            {product.name}
+                          </p>
+                          {product.model ? (
+                            <p className="mt-0.5 text-xs text-slate-500">{product.model}</p>
+                          ) : null}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-4 text-sm text-slate-600">
                       {product.main_sku ?? "—"}
@@ -175,17 +192,13 @@ export function ProductTable({ products }: ProductTableProps) {
                       <StatusBadge status={product.status} />
                     </td>
                     <td className="px-4 py-4">
-                      {product.has_variants ? (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedProduct(product)}
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-800"
-                        >
-                          Ver variantes
-                        </button>
-                      ) : (
-                        <span className="text-sm text-slate-400">—</span>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setDetailProduct(product)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-800"
+                      >
+                        Ver detalle
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -195,14 +208,19 @@ export function ProductTable({ products }: ProductTableProps) {
         </div>
       )}
 
-      <ProductVariantsModal
-        product={selectedProduct}
-        onClose={() => setSelectedProduct(null)}
-      />
-
       <ProductCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+      />
+
+      <ProductDetailModal
+        product={detailProduct}
+        onClose={() => setDetailProduct(null)}
+      />
+
+      <ImageLightbox
+        src={lightboxSrc}
+        onClose={() => setLightboxSrc(null)}
       />
     </>
   );

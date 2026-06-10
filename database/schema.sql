@@ -92,6 +92,42 @@ $$;
 grant execute on function public.login_app_user(text, text) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Columnas de imagen (agregar si no existen)
+-- Nota: usamos image_path (public URL de Supabase Storage bucket product-images)
+-- ---------------------------------------------------------------------------
+alter table public.products
+  add column if not exists image_path text;
+
+alter table public.product_variants
+  add column if not exists image_path text;
+
+-- ---------------------------------------------------------------------------
+-- Bucket de imágenes: product-images
+-- Crear el bucket desde el panel de Supabase (Storage > New bucket)
+-- con Public = true, luego ejecutar las siguientes políticas:
+-- ---------------------------------------------------------------------------
+
+-- Lectura pública (anon puede leer las imágenes)
+-- create policy "public read product images"
+--   on storage.objects for select
+--   to public
+--   using (bucket_id = 'product-images');
+
+-- Escritura solo para usuarios autenticados con rol admin
+-- create policy "admin upload product images"
+--   on storage.objects for insert
+--   to authenticated
+--   with check (
+--     bucket_id = 'product-images'
+--     and exists (
+--       select 1 from public.app_users
+--       where auth_user_id = auth.uid()
+--         and role = 'admin'
+--         and is_active = true
+--     )
+--   );
+
+-- ---------------------------------------------------------------------------
 -- RLS: app_users
 -- ---------------------------------------------------------------------------
 alter table public.app_users enable row level security;
@@ -123,6 +159,31 @@ create policy authenticated_insert_products
   on public.products
   for insert
   to authenticated
+  with check (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
+drop policy if exists authenticated_update_products on public.products;
+
+create policy authenticated_update_products
+  on public.products
+  for update
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  )
   with check (
     exists (
       select 1
@@ -168,6 +229,31 @@ create policy authenticated_insert_product_variants
   on public.product_variants
   for insert
   to authenticated
+  with check (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
+drop policy if exists authenticated_update_product_variants on public.product_variants;
+
+create policy authenticated_update_product_variants
+  on public.product_variants
+  for update
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  )
   with check (
     exists (
       select 1

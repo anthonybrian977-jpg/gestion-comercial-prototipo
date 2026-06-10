@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createProduct } from "@/modules/productos/actions/create-product";
+import { uploadProductImage } from "@/lib/supabase/upload-image";
 import type { CreateVariantInput } from "@/modules/productos/types";
 
 type ProductCreateModalProps = {
@@ -76,18 +77,63 @@ function SectionTitle({
   );
 }
 
+// Small reusable image upload button used in variant rows
+function ImageUploadButton({
+  variantId,
+  preview,
+  onChange,
+}: {
+  variantId: string;
+  preview: string | undefined;
+  onChange: (variantId: string, e: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex items-center gap-2">
+      {preview ? (
+        <img
+          src={preview}
+          alt=""
+          className="h-8 w-8 shrink-0 rounded border border-slate-200 object-cover"
+        />
+      ) : null}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={(e) => onChange(variantId, e)}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+      >
+        {preview ? "Cambiar" : "Subir imagen"}
+      </button>
+      {!preview && (
+        <span className="text-xs text-slate-400">JPG, PNG, WebP · máx. 2 MB</span>
+      )}
+    </div>
+  );
+}
+
 function VariantFields({
   variant,
   index,
   hasVariants,
+  variantPreview,
   onChange,
+  onImageChange,
   onRemove,
   canRemove,
 }: {
   variant: VariantFormState;
   index: number;
   hasVariants: boolean;
+  variantPreview: string | undefined;
   onChange: (id: string, field: keyof VariantFormState, value: string) => void;
+  onImageChange: (variantId: string, e: ChangeEvent<HTMLInputElement>) => void;
   onRemove: (id: string) => void;
   canRemove: boolean;
 }) {
@@ -109,62 +155,55 @@ function VariantFields({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {/* SKU */}
         <div>
           <label className={labelClassName}>SKU</label>
           <input
             type="text"
             value={variant.sku}
-            onChange={(event) => onChange(variant.id, "sku", event.target.value)}
+            onChange={(e) => onChange(variant.id, "sku", e.target.value)}
             placeholder="Automático si se deja vacío"
             className={inputClassName}
           />
         </div>
 
-        {hasVariants ? (
-          <div>
-            <label className={labelClassName}>Presentación</label>
-            <input
-              type="text"
-              value={variant.presentation}
-              onChange={(event) =>
-                onChange(variant.id, "presentation", event.target.value)
-              }
-              placeholder="Ej. 50ml, Switch azul"
-              className={inputClassName}
-            />
-          </div>
-        ) : (
-          <div>
-            <label className={labelClassName}>Presentación</label>
-            <input
-              type="text"
-              value="Principal"
-              disabled
-              className={`${inputClassName} cursor-not-allowed opacity-70`}
-            />
-          </div>
-        )}
+        {/* Presentación */}
+        <div>
+          <label className={labelClassName}>Presentación</label>
+          <input
+            type="text"
+            value={variant.presentation}
+            onChange={(e) =>
+              onChange(variant.id, "presentation", e.target.value)
+            }
+            placeholder={hasVariants ? "Ej. 50ml, Switch azul" : "Principal"}
+            className={inputClassName}
+          />
+        </div>
 
+        {/* Color */}
         <div>
           <label className={labelClassName}>Color</label>
           <input
             type="text"
             value={variant.color}
-            onChange={(event) => onChange(variant.id, "color", event.target.value)}
+            onChange={(e) => onChange(variant.id, "color", e.target.value)}
             className={inputClassName}
           />
         </div>
 
+        {/* Talla */}
         <div>
           <label className={labelClassName}>Talla</label>
           <input
             type="text"
             value={variant.size}
-            onChange={(event) => onChange(variant.id, "size", event.target.value)}
+            onChange={(e) => onChange(variant.id, "size", e.target.value)}
             className={inputClassName}
           />
         </div>
 
+        {/* Precio compra */}
         <div>
           <label className={labelClassName}>Precio compra *</label>
           <input
@@ -173,13 +212,14 @@ function VariantFields({
             step="0.01"
             required
             value={variant.purchasePrice}
-            onChange={(event) =>
-              onChange(variant.id, "purchasePrice", event.target.value)
+            onChange={(e) =>
+              onChange(variant.id, "purchasePrice", e.target.value)
             }
             className={inputClassName}
           />
         </div>
 
+        {/* Precio venta */}
         <div>
           <label className={labelClassName}>Precio venta *</label>
           <input
@@ -188,13 +228,14 @@ function VariantFields({
             step="0.01"
             required
             value={variant.salePrice}
-            onChange={(event) =>
-              onChange(variant.id, "salePrice", event.target.value)
+            onChange={(e) =>
+              onChange(variant.id, "salePrice", e.target.value)
             }
             className={inputClassName}
           />
         </div>
 
+        {/* Stock inicial */}
         <div>
           <label className={labelClassName}>Stock inicial *</label>
           <input
@@ -203,11 +244,12 @@ function VariantFields({
             step="1"
             required
             value={variant.stock}
-            onChange={(event) => onChange(variant.id, "stock", event.target.value)}
+            onChange={(e) => onChange(variant.id, "stock", e.target.value)}
             className={inputClassName}
           />
         </div>
 
+        {/* Stock mínimo */}
         <div>
           <label className={labelClassName}>Stock mínimo *</label>
           <input
@@ -216,10 +258,20 @@ function VariantFields({
             step="1"
             required
             value={variant.minStock}
-            onChange={(event) =>
-              onChange(variant.id, "minStock", event.target.value)
+            onChange={(e) =>
+              onChange(variant.id, "minStock", e.target.value)
             }
             className={inputClassName}
+          />
+        </div>
+
+        {/* Imagen de variante */}
+        <div className="md:col-span-2 xl:col-span-4">
+          <label className={labelClassName}>Imagen de variante</label>
+          <ImageUploadButton
+            variantId={variant.id}
+            preview={variantPreview}
+            onChange={onImageChange}
           />
         </div>
       </div>
@@ -233,15 +285,37 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Image file states — separate from form to avoid serialisation issues
+  const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [productImagePreview, setProductImagePreview] = useState("");
+  const [variantImageFiles, setVariantImageFiles] = useState<Map<string, File>>(
+    new Map(),
+  );
+  const [variantImagePreviews, setVariantImagePreviews] = useState<
+    Map<string, string>
+  >(new Map());
+
+  const productImageInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!open) {
       setForm(createInitialFormState());
       setError("");
       setLoading(false);
+      setProductImageFile(null);
+      if (productImagePreview) URL.revokeObjectURL(productImagePreview);
+      setProductImagePreview("");
+      for (const url of variantImagePreviews.values())
+        URL.revokeObjectURL(url);
+      setVariantImageFiles(new Map());
+      setVariantImagePreviews(new Map());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
+
+  // ── form helpers ───────────────────────────────────────────────────────────
 
   function updateField<K extends keyof typeof form>(
     field: K,
@@ -271,7 +345,8 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
         ? current.variants.length > 0
           ? current.variants.map((variant) => ({
               ...variant,
-              presentation: variant.presentation === "Principal" ? "" : variant.presentation,
+              presentation:
+                variant.presentation === "Principal" ? "" : variant.presentation,
             }))
           : [createEmptyVariant()]
         : [createEmptyVariant("Principal")],
@@ -290,10 +365,78 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
       ...current,
       variants: current.variants.filter((variant) => variant.id !== id),
     }));
+    // Clean up any image state for this variant
+    const prevUrl = variantImagePreviews.get(id);
+    if (prevUrl) URL.revokeObjectURL(prevUrl);
+    setVariantImageFiles((m) => {
+      const next = new Map(m);
+      next.delete(id);
+      return next;
+    });
+    setVariantImagePreviews((m) => {
+      const next = new Map(m);
+      next.delete(id);
+      return next;
+    });
   }
 
-  function mapVariantsForSubmit(): CreateVariantInput[] {
-    return form.variants.map((variant) => ({
+  // ── image handlers ─────────────────────────────────────────────────────────
+
+  function handleProductImageChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (productImagePreview) URL.revokeObjectURL(productImagePreview);
+    setProductImageFile(file);
+    setProductImagePreview(URL.createObjectURL(file));
+  }
+
+  function handleVariantImageChange(
+    variantId: string,
+    e: ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const prev = variantImagePreviews.get(variantId);
+    if (prev) URL.revokeObjectURL(prev);
+    setVariantImageFiles((m) => new Map(m).set(variantId, file));
+    setVariantImagePreviews((m) =>
+      new Map(m).set(variantId, URL.createObjectURL(file)),
+    );
+  }
+
+  // ── submit ─────────────────────────────────────────────────────────────────
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+
+    // 1. Upload product image
+    let resolvedProductImagePath: string | undefined;
+    if (productImageFile) {
+      const upload = await uploadProductImage(productImageFile, "products");
+      if (!upload.success) {
+        setError(upload.message);
+        setLoading(false);
+        return;
+      }
+      resolvedProductImagePath = upload.path; // ← path interno → se guarda en BD
+    }
+
+    // 2. Upload variant images
+    const resolvedVariantPaths = new Map<string, string>();
+    for (const [variantId, file] of variantImageFiles) {
+      const upload = await uploadProductImage(file, "variants");
+      if (!upload.success) {
+        setError(upload.message);
+        setLoading(false);
+        return;
+      }
+      resolvedVariantPaths.set(variantId, upload.path); // ← path interno → se guarda en BD
+    }
+
+    // 3. Build variants payload
+    const variants: CreateVariantInput[] = form.variants.map((variant) => ({
       sku: variant.sku.trim() || undefined,
       presentation: form.hasVariants
         ? variant.presentation.trim() || undefined
@@ -305,13 +448,8 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
       stock: Number(variant.stock),
       minStock: Number(variant.minStock),
       status: variant.status,
+      imagePath: resolvedVariantPaths.get(variant.id),
     }));
-  }
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setLoading(true);
 
     const result = await createProduct({
       name: form.name,
@@ -320,9 +458,10 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
       category: form.category,
       description: form.description,
       mainSku: form.mainSku,
+      imagePath: resolvedProductImagePath,
       hasVariants: form.hasVariants,
       status: form.status,
-      variants: mapVariantsForSubmit(),
+      variants,
     });
 
     if (!result.success) {
@@ -358,6 +497,7 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
 
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="overflow-y-auto px-6 py-5">
+            {/* ── Datos generales ───────────────────────────────────────── */}
             <section className="mb-8">
               <SectionTitle
                 title="Datos generales"
@@ -370,7 +510,7 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
                     type="text"
                     required
                     value={form.name}
-                    onChange={(event) => updateField("name", event.target.value)}
+                    onChange={(e) => updateField("name", e.target.value)}
                     className={inputClassName}
                   />
                 </div>
@@ -379,7 +519,7 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
                   <input
                     type="text"
                     value={form.brand}
-                    onChange={(event) => updateField("brand", event.target.value)}
+                    onChange={(e) => updateField("brand", e.target.value)}
                     className={inputClassName}
                   />
                 </div>
@@ -388,7 +528,7 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
                   <input
                     type="text"
                     value={form.model}
-                    onChange={(event) => updateField("model", event.target.value)}
+                    onChange={(e) => updateField("model", e.target.value)}
                     className={inputClassName}
                   />
                 </div>
@@ -397,7 +537,7 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
                   <input
                     type="text"
                     value={form.category}
-                    onChange={(event) => updateField("category", event.target.value)}
+                    onChange={(e) => updateField("category", e.target.value)}
                     className={inputClassName}
                   />
                 </div>
@@ -406,7 +546,7 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
                   <input
                     type="text"
                     value={form.mainSku}
-                    onChange={(event) => updateField("mainSku", event.target.value)}
+                    onChange={(e) => updateField("mainSku", e.target.value)}
                     placeholder="Automático si se deja vacío"
                     className={inputClassName}
                   />
@@ -415,27 +555,58 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
                   <label className={labelClassName}>Estado</label>
                   <select
                     value={form.status}
-                    onChange={(event) => updateField("status", event.target.value)}
+                    onChange={(e) => updateField("status", e.target.value)}
                     className={inputClassName}
                   >
                     <option value="active">Activo</option>
                     <option value="inactive">Inactivo</option>
                   </select>
                 </div>
+                {/* Imagen del producto */}
+                <div className="md:col-span-2">
+                  <label className={labelClassName}>Imagen del producto</label>
+                  <div className="flex items-center gap-3">
+                    {productImagePreview ? (
+                      <img
+                        src={productImagePreview}
+                        alt=""
+                        className="h-12 w-12 shrink-0 rounded-lg border border-slate-200 object-cover"
+                      />
+                    ) : null}
+                    <input
+                      ref={productImageInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={handleProductImageChange}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => productImageInputRef.current?.click()}
+                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {productImagePreview ? "Cambiar imagen" : "Subir imagen"}
+                    </button>
+                    {!productImagePreview && (
+                      <span className="text-xs text-slate-400">
+                        JPG, PNG o WebP · máx. 2 MB (opcional)
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <div className="md:col-span-2">
                   <label className={labelClassName}>Descripción</label>
                   <textarea
                     rows={3}
                     value={form.description}
-                    onChange={(event) =>
-                      updateField("description", event.target.value)
-                    }
+                    onChange={(e) => updateField("description", e.target.value)}
                     className={inputClassName}
                   />
                 </div>
               </div>
             </section>
 
+            {/* ── Configuración de variantes ────────────────────────────── */}
             <section className="mb-8">
               <SectionTitle
                 title="Configuración de variantes"
@@ -445,7 +616,7 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
                 <input
                   type="checkbox"
                   checked={form.hasVariants}
-                  onChange={(event) => handleHasVariantsChange(event.target.checked)}
+                  onChange={(e) => handleHasVariantsChange(e.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
                 />
                 <span className="text-sm font-medium text-slate-800">
@@ -454,6 +625,7 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
               </label>
             </section>
 
+            {/* ── Stock y precios ───────────────────────────────────────── */}
             <section>
               <div className="mb-4 flex items-center justify-between gap-3">
                 <SectionTitle
@@ -482,7 +654,9 @@ export function ProductCreateModal({ open, onClose }: ProductCreateModalProps) {
                     variant={variant}
                     index={index}
                     hasVariants={form.hasVariants}
+                    variantPreview={variantImagePreviews.get(variant.id)}
                     onChange={updateVariantField}
+                    onImageChange={handleVariantImageChange}
                     onRemove={removeVariant}
                     canRemove={form.variants.length > 1}
                   />

@@ -111,6 +111,7 @@ export async function createProduct(
         category: normalizeOptional(input.category),
         description: normalizeOptional(input.description),
         main_sku: mainSku,
+        image_path: normalizeOptional(input.imagePath),
         has_variants: input.hasVariants,
         status: input.status || "active",
       })
@@ -146,6 +147,7 @@ export async function createProduct(
       stock: variant.stock,
       min_stock: variant.minStock,
       status: variant.status || "active",
+      image_path: normalizeOptional(variant.imagePath),
     }));
 
     const { error: variantsError } = await supabase
