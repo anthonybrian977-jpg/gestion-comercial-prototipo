@@ -32,3 +32,27 @@ export type ProductListItem = ProductRecord & {
   variants: ProductVariant[];
   hasLowStock: boolean;
 };
+
+export type CreateVariantInput = {
+  sku?: string;
+  presentation?: string;
+  color?: string;
+  size?: string;
+  purchasePrice: number;
+  salePrice: number;
+  stock: number;
+  minStock: number;
+  status: string;
+};
+
+export type CreateProductInput = {
+  name: string;
+  brand?: string;
+  model?: string;
+  category?: string;
+  description?: string;
+  mainSku?: string;
+  hasVariants: boolean;
+  status: string;
+  variants: CreateVariantInput[];
+};

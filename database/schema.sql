@@ -117,6 +117,38 @@ create policy authenticated_read_products
   to authenticated
   using (true);
 
+drop policy if exists authenticated_insert_products on public.products;
+
+create policy authenticated_insert_products
+  on public.products
+  for insert
+  to authenticated
+  with check (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
+drop policy if exists authenticated_delete_products on public.products;
+
+create policy authenticated_delete_products
+  on public.products
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
 -- ---------------------------------------------------------------------------
 -- RLS: product_variants
 -- ---------------------------------------------------------------------------
@@ -129,3 +161,19 @@ create policy authenticated_read_product_variants
   for select
   to authenticated
   using (true);
+
+drop policy if exists authenticated_insert_product_variants on public.product_variants;
+
+create policy authenticated_insert_product_variants
+  on public.product_variants
+  for insert
+  to authenticated
+  with check (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );

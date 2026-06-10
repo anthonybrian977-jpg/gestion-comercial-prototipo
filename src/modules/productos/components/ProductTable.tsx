@@ -7,6 +7,7 @@ import {
   formatNumber,
 } from "@/modules/productos/utils/format";
 import { ProductVariantsModal } from "@/modules/productos/components/ProductVariantsModal";
+import { ProductCreateModal } from "@/modules/productos/components/ProductCreateModal";
 
 type ProductTableProps = {
   products: ProductListItem[];
@@ -48,6 +49,7 @@ export function ProductTable({ products }: ProductTableProps) {
   const [selectedProduct, setSelectedProduct] = useState<ProductListItem | null>(
     null,
   );
+  const [createOpen, setCreateOpen] = useState(false);
 
   const filteredProducts = useMemo(
     () => products.filter((product) => matchesSearch(product, search)),
@@ -60,10 +62,10 @@ export function ProductTable({ products }: ProductTableProps) {
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            disabled
-            className="cursor-not-allowed rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-400"
+            onClick={() => setCreateOpen(true)}
+            className="rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-700"
           >
-            Nuevo producto · Próximamente
+            Nuevo producto
           </button>
           <button
             type="button"
@@ -196,6 +198,11 @@ export function ProductTable({ products }: ProductTableProps) {
       <ProductVariantsModal
         product={selectedProduct}
         onClose={() => setSelectedProduct(null)}
+      />
+
+      <ProductCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
       />
     </>
   );
