@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ProductListItem } from "@/modules/productos/types";
+import type { ProductListItem, VariantSupplierPrice } from "@/modules/productos/types";
 import { updateProduct } from "@/modules/productos/actions/update-product";
 import {
   uploadProductImage,
@@ -13,6 +13,7 @@ import {
   formatCurrency,
   formatNumber,
 } from "@/modules/productos/utils/format";
+import { createClient } from "@/lib/supabase/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -174,6 +175,9 @@ export function ProductDetailModal({
   // Lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
+  // Precios por proveedor (view mode)
+  const [supplierPrices, setSupplierPrices] = useState<VariantSupplierPrice[] | null>(null);
+
   // Blob URLs para preview inmediato — nunca se guardan en BD
   const [productImageFile, setProductImageFile] = useState<File | null>(null);
   const [productImagePreview, setProductImagePreview] = useState("");
@@ -195,6 +199,64 @@ export function ProductDetailModal({
       resetImageStates();
     }
   }, [product]);
+
+  // Cargar precios por proveedor cuando cambia el producto
+  useEffect(() => {
+    if (!product) {
+      setSupplierPrices(null);
+      return;
+    }
+
+    const variantIds = product.variants.map((v) => v.id);
+    if (variantIds.length === 0) {
+      setSupplierPrices([]);
+      return;
+    }
+
+    const supabase = createClient();
+    supabase
+      .from("supplier_products")
+      .select("variant_id, purchase_price, suppliers(id, name)")
+      .in("variant_id", variantIds)
+      .then(({ data, error: fetchError }) => {
+        if (fetchError || !data) {
+          setSupplierPrices([]);
+          return;
+        }
+
+        type SpPriceRow = {
+          variant_id: string;
+          purchase_price: number;
+          suppliers: { id: string; name: string } | null;
+        };
+
+        const rows = data as unknown as SpPriceRow[];
+
+        // Calcular precio mínimo por variante
+        const minByVariant = new Map<string, number>();
+        for (const row of rows) {
+          if (!row.suppliers) continue;
+          const current = minByVariant.get(row.variant_id);
+          if (current === undefined || row.purchase_price < current) {
+            minByVariant.set(row.variant_id, row.purchase_price);
+          }
+        }
+
+        const prices: VariantSupplierPrice[] = rows
+          .filter((row) => row.suppliers !== null)
+          .map((row) => ({
+            variant_id: row.variant_id,
+            supplier_id: row.suppliers!.id,
+            supplier_name: row.suppliers!.name,
+            purchase_price: row.purchase_price,
+            is_best:
+              row.purchase_price <=
+              (minByVariant.get(row.variant_id) ?? Infinity),
+          }));
+
+        setSupplierPrices(prices);
+      });
+  }, [product?.id]);
 
   // Revocar blob URLs al cambiar o desmontar
   useEffect(() => {
@@ -567,6 +629,60 @@ export function ProductDetailModal({
 
           {/* ── TABLE ───────────────────────────────────────────────────── */}
           <div className="min-h-0 flex-1 overflow-auto">
+            {/* Precios por proveedor — solo en modo vista */}
+            {!isEdit && supplierPrices !== null && supplierPrices.length > 0 && (
+              <div className="border-b border-slate-100 px-6 py-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Precios por proveedor
+                </p>
+                <div className="space-y-3">
+                  {product.variants.map((v) => {
+                    const prices = supplierPrices.filter(
+                      (sp) => sp.variant_id === v.id,
+                    );
+                    if (prices.length === 0) return null;
+                    const label = [v.sku, v.color, v.presentation ? `(${v.presentation})` : null]
+                      .filter(Boolean)
+                      .join(" — ");
+                    return (
+                      <div key={v.id}>
+                        <p className="mb-1.5 text-xs font-medium text-slate-700">
+                          {label}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {prices
+                            .slice()
+                            .sort((a, b) => a.purchase_price - b.purchase_price)
+                            .map((sp) => (
+                              <div
+                                key={sp.supplier_id}
+                                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs ${
+                                  sp.is_best
+                                    ? "border-emerald-200 bg-emerald-50"
+                                    : "border-slate-200 bg-slate-50"
+                                }`}
+                              >
+                                <span className="font-medium text-slate-800">
+                                  {sp.supplier_name}
+                                </span>
+                                <span className="text-slate-500">
+                                  {formatCurrency(sp.purchase_price)}
+                                </span>
+                                {sp.is_best ? (
+                                  <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                    Mejor precio
+                                  </span>
+                                ) : null}
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {form.variants.length === 0 ? (
               <div className="px-6 py-10 text-center text-sm text-slate-500">
                 Este producto no tiene variantes registradas.

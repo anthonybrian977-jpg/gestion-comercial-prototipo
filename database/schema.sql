@@ -266,3 +266,174 @@ create policy authenticated_update_product_variants
         and is_active = true
     )
   );
+
+-- ---------------------------------------------------------------------------
+-- Tabla: suppliers
+-- ---------------------------------------------------------------------------
+create table if not exists public.suppliers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  ruc text unique,
+  contact_name text,
+  phone text,
+  email text,
+  address text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- Tabla: supplier_products
+-- Relaciona un proveedor con una variante de producto y su precio de compra.
+-- variant_id → product_variants.id (la unidad vendible real con SKU y stock).
+-- ---------------------------------------------------------------------------
+create table if not exists public.supplier_products (
+  id uuid primary key default gen_random_uuid(),
+  supplier_id uuid not null references public.suppliers (id) on delete cascade,
+  variant_id uuid not null references public.product_variants (id) on delete cascade,
+  purchase_price numeric(12, 2) not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (supplier_id, variant_id)
+);
+
+-- ---------------------------------------------------------------------------
+-- RLS: suppliers
+-- ---------------------------------------------------------------------------
+alter table public.suppliers enable row level security;
+
+drop policy if exists authenticated_read_suppliers on public.suppliers;
+
+create policy authenticated_read_suppliers
+  on public.suppliers
+  for select
+  to authenticated
+  using (true);
+
+drop policy if exists authenticated_insert_suppliers on public.suppliers;
+
+create policy authenticated_insert_suppliers
+  on public.suppliers
+  for insert
+  to authenticated
+  with check (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
+drop policy if exists authenticated_update_suppliers on public.suppliers;
+
+create policy authenticated_update_suppliers
+  on public.suppliers
+  for update
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
+drop policy if exists authenticated_delete_suppliers on public.suppliers;
+
+create policy authenticated_delete_suppliers
+  on public.suppliers
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
+-- ---------------------------------------------------------------------------
+-- RLS: supplier_products
+-- ---------------------------------------------------------------------------
+alter table public.supplier_products enable row level security;
+
+drop policy if exists authenticated_read_supplier_products on public.supplier_products;
+
+create policy authenticated_read_supplier_products
+  on public.supplier_products
+  for select
+  to authenticated
+  using (true);
+
+drop policy if exists authenticated_insert_supplier_products on public.supplier_products;
+
+create policy authenticated_insert_supplier_products
+  on public.supplier_products
+  for insert
+  to authenticated
+  with check (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
+drop policy if exists authenticated_update_supplier_products on public.supplier_products;
+
+create policy authenticated_update_supplier_products
+  on public.supplier_products
+  for update
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );
+
+drop policy if exists authenticated_delete_supplier_products on public.supplier_products;
+
+create policy authenticated_delete_supplier_products
+  on public.supplier_products
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.app_users
+      where auth_user_id = auth.uid()
+        and role = 'admin'
+        and is_active = true
+    )
+  );

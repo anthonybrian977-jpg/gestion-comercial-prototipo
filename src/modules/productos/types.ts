@@ -100,3 +100,13 @@ export type UpdateProductInput = {
   variants: UpdateVariantInput[];
   newVariants?: NewVariantForUpdate[];
 };
+
+/** Precio de compra de una variante según un proveedor concreto. */
+export type VariantSupplierPrice = {
+  variant_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  purchase_price: number;
+  /** true si este es el precio más bajo entre todos los proveedores para esa variante. */
+  is_best: boolean;
+};
