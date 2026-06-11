@@ -67,6 +67,58 @@ export type ConfirmReceiptItemPayload = {
   // (linked_*_id, snapshots, unit_cost). El cliente no los envía.
 };
 
+// ─── Historial de ingresos — resumen por fila ────────────────────────────────
+
+export type GoodsReceiptHistorySummary = {
+  id: string;
+  receipt_number: string;
+  purchase_order_id: string;
+  order_number: string;
+  supplier_name: string;
+  receipt_date: string;
+  created_at: string;
+  /** Unidades sumadas en este ingreso puntual */
+  received_in_this_receipt: number;
+  /** Total ordenado en la OC */
+  ordered_total: number;
+  /** Acumulado recibido de la OC hasta e incluyendo este ingreso */
+  received_cumulative_after_receipt: number;
+  /** Pendiente de la OC justo después de este ingreso */
+  pending_after_receipt: number;
+  /** Estado de la OC justo después de este ingreso */
+  status_after_receipt: "complete" | "partial";
+};
+
+// ─── Historial de ingresos — detalle ─────────────────────────────────────────
+
+export type GoodsReceiptDetailItem = {
+  id: string;
+  purchase_order_item_id: string | null;
+  product_name_snapshot: string;
+  variant_snapshot: string | null;
+  supplier_sku_snapshot: string | null;
+  quantity_received: number;
+  unit_cost: number | null;
+  notes: string | null;
+};
+
+export type GoodsReceiptDetailHeader = {
+  id: string;
+  receipt_number: string;
+  purchase_order_id: string;
+  order_number: string;
+  supplier_name: string;
+  receipt_date: string;
+  created_at: string;
+  notes: string | null;
+  received_in_this_receipt: number;
+  ordered_total: number;
+  received_cumulative_after_receipt: number;
+  pending_after_receipt: number;
+  status_after_receipt: "complete" | "partial";
+  items: GoodsReceiptDetailItem[];
+};
+
 // ─── Resultado de server action ───────────────────────────────────────────────
 
 export type GoodsReceiptActionResult = {
