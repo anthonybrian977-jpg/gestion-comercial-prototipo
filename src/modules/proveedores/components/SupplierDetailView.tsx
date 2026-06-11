@@ -31,11 +31,11 @@ function filterCatalog(items: SupplierCatalogItem[], query: string): SupplierCat
 function ImportedBadge({ imported }: { imported: boolean }) {
   return imported ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100">
-      ✓ En Maestro
+      ✓ Vinculado
     </span>
   ) : (
     <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
-      Pendiente
+      Sin vincular
     </span>
   );
 }
@@ -168,7 +168,7 @@ export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
             <table className="min-w-full divide-y divide-slate-100">
               <thead className="bg-slate-50">
                 <tr>
-                  {["SKU prov.", "Producto", "Marca", "Cat.", "Color", "Talla", "Presentación", "Precio compra", "Estado", "Maestro", ""].map((h, i) => (
+                  {["SKU prov.", "Producto", "Marca", "Cat.", "Color", "Talla", "Presentación", "Precio compra", "Estado", "Vínculo", ""].map((h, i) => (
                     <th key={i} className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                       {h}
                     </th>

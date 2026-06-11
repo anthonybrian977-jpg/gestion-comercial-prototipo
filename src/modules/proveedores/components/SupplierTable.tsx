@@ -54,8 +54,8 @@ export function SupplierTable({ suppliers }: SupplierTableProps) {
                     "Teléfono",
                     "Email",
                     "En catálogo",
-                    "Importados",
-                    "Pendientes",
+                    "Vinculados",
+                    "Sin vincular",
                     "Estado",
                     "Acciones",
                   ].map((header) => (

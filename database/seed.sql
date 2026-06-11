@@ -410,3 +410,146 @@ begin
 
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Catálogo demo de proveedores (supplier_catalog_items)
+-- Idempotente: limpia y reconstruye cada vez que se ejecuta.
+-- Ejecutar DESPUÉS de haber creado la tabla supplier_catalog_items.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  s_a uuid;   -- Proveedor A
+  s_b uuid;   -- Proveedor B
+
+  -- variante → (variant_id, product_id)
+  v_am50_id   uuid;  p_am_id      uuid;
+  v_am100_id  uuid;
+  v_bot_id    uuid;  p_bot_id     uuid;
+  v_lap_r5_id uuid;  p_lap_id     uuid;
+  v_tec_neg_id uuid; p_tec_id     uuid;
+  v_zap_id    uuid;  p_zap_id     uuid;
+begin
+  -- ── Recuperar IDs de proveedores ─────────────────────────────────────────
+  select id into s_a from public.suppliers where ruc = '20100000001';
+  select id into s_b from public.suppliers where ruc = '20100000002';
+
+  if s_a is null or s_b is null then
+    raise notice 'Proveedores demo no encontrados. Ejecuta seed.sql primero.';
+    return;
+  end if;
+
+  -- ── Recuperar IDs de variantes y sus productos ───────────────────────────
+  select pv.id, pv.product_id into v_am50_id,    p_am_id
+    from public.product_variants pv where pv.sku = 'AM-50ML-001';
+
+  select pv.id into v_am100_id
+    from public.product_variants pv where pv.sku = 'AM-100ML-002';
+
+  select pv.id, pv.product_id into v_bot_id,     p_bot_id
+    from public.product_variants pv where pv.sku = 'BOT-THERM-1L';
+
+  select pv.id, pv.product_id into v_lap_r5_id,  p_lap_id
+    from public.product_variants pv where pv.sku = 'LAP-LEN-IP3-R5';
+
+  select pv.id, pv.product_id into v_tec_neg_id, p_tec_id
+    from public.product_variants pv where pv.sku = 'TEC-K552-NEGRO';
+
+  select pv.id, pv.product_id into v_zap_id,     p_zap_id
+    from public.product_variants pv where pv.sku = 'ZAP-URB-TEST-40';
+
+  -- ── Limpiar datos anteriores ─────────────────────────────────────────────
+  update public.product_variants
+    set preferred_catalog_item_id = null
+    where preferred_catalog_item_id is not null;
+
+  delete from public.supplier_catalog_items;
+
+  -- ── Proveedor A: 3 vinculados + 2 sin vincular ───────────────────────────
+  insert into public.supplier_catalog_items (
+    supplier_id, supplier_sku,
+    product_name, brand, model, category,
+    presentation, color, size,
+    purchase_price, is_active,
+    linked_variant_id, linked_product_id, imported_to_master
+  ) values
+    -- Vinculados al Maestro
+    (s_a, 'AM-50-PA',
+     'Alien Mugler', 'Mugler', 'Alien', 'Perfumes',
+     '50ml', null, null,
+     260.00, true,
+     v_am50_id, p_am_id, true),
+
+    (s_a, 'AM-100-PA',
+     'Alien Mugler', 'Mugler', 'Alien', 'Perfumes',
+     '100ml', null, null,
+     440.00, true,
+     v_am100_id, p_am_id, true),
+
+    (s_a, 'BOT-1L-PA',
+     'Botella Térmica 1L', 'ThermoMax', 'Térmica Pro', 'Hogar',
+     '1 Litro', 'Plateado', null,
+     45.00, true,
+     v_bot_id, p_bot_id, true),
+
+    -- Sin vincular (productos que ofrece pero no están en el Maestro aún)
+    (s_a, 'AUD-GX-PA',
+     'Audífono Gamer X', 'SoundPro', 'GX-200', 'Audio',
+     'USB', 'Negro', null,
+     120.00, true,
+     null, null, false),
+
+    (s_a, 'MOUSE-PA',
+     'Mouse Inalámbrico Pro', 'TechGear', 'M700', 'Periféricos',
+     'Inalámbrico', 'Negro', null,
+     55.00, true,
+     null, null, false);
+
+  -- ── Proveedor B: 3 vinculados + 3 sin vincular ───────────────────────────
+  insert into public.supplier_catalog_items (
+    supplier_id, supplier_sku,
+    product_name, brand, model, category,
+    presentation, color, size,
+    purchase_price, is_active,
+    linked_variant_id, linked_product_id, imported_to_master
+  ) values
+    -- Vinculados al Maestro
+    (s_b, 'LAP-R5-PB',
+     'Laptop Lenovo IdeaPad 3', 'Lenovo', 'IdeaPad 3', 'Laptops',
+     'Ryzen 5 / 8GB / 512GB', 'Gris', null,
+     1800.00, true,
+     v_lap_r5_id, p_lap_id, true),
+
+    (s_b, 'TEC-NEG-PB',
+     'Teclado Redragon K552', 'Redragon', 'K552', 'Teclados',
+     'Switch azul', 'Negro', null,
+     85.00, true,
+     v_tec_neg_id, p_tec_id, true),
+
+    (s_b, 'ZAP-40-PB',
+     'Zapatilla Urbana Test', 'UrbanStep', 'Urbana X', 'Calzado',
+     'Principal', 'Blanco', '40',
+     60.00, true,
+     v_zap_id, p_zap_id, true),
+
+    -- Sin vincular
+    (s_b, 'CAM-1080-PB',
+     'Cámara Web 1080p', 'ViewCam', 'HD-1080', 'Periféricos',
+     'Full HD', 'Negro', null,
+     180.00, true,
+     null, null, false),
+
+    (s_b, 'MOCH-AZ-PB',
+     'Mochila Ejecutiva Azul', 'UrbanBag', 'Exec 30L', 'Accesorios',
+     '30 Litros', 'Azul', null,
+     45.00, true,
+     null, null, false),
+
+    (s_b, 'PARL-BT-PB',
+     'Parlante Bluetooth Mini', 'SoundBox', 'BT-Mini', 'Audio',
+     'Bluetooth 5.0', 'Negro', null,
+     65.00, true,
+     null, null, false);
+
+  raise notice 'Catálogo demo insertado: Proveedor A (5 items), Proveedor B (6 items).';
+end;
+$$;
