@@ -95,7 +95,7 @@ function AlternativesPanel({
                 <span className="opacity-70">({Math.abs(alt.livePct).toFixed(1)}%)</span>
               </span>
               <Link
-                href={`/orden-compra/nueva?supplierId=${alt.supplierId}`}
+                href={`/orden-compra/nueva?supplierId=${alt.supplierId}&catalogItemId=${alt.catalogItemId}`}
                 target="_blank"
                 className="w-16 shrink-0 rounded px-1.5 py-0.5 text-center text-[10px] font-semibold text-cyan-600 ring-1 ring-cyan-200 hover:bg-cyan-50"
                 title={`Abrir nueva OC con ${alt.supplierName} en nueva pestaña`}
@@ -121,10 +121,13 @@ export function NewPurchaseOrderView({
   suppliers,
   initialSupplierId = "",
   initialCatalog = [],
+  initialCatalogItemId = "",
 }: {
   suppliers: SupplierRecord[];
   initialSupplierId?: string;
   initialCatalog?: SupplierCatalogItem[];
+  /** ID de supplier_catalog_item a agregar automáticamente al carrito (viene de comparativa). */
+  initialCatalogItemId?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -151,16 +154,42 @@ export function NewPurchaseOrderView({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [autoAddMsg, setAutoAddMsg] = useState("");
 
-  // Cargar alternativas para catálogo inicial (URL con ?supplierId=...)
+  // Inicialización con catálogo pre-cargado (URL con ?supplierId=...&catalogItemId=...)
   useEffect(() => {
     if (initialSupplierId && initialCatalog.length > 0) {
+      // 1. Cargar alternativas en background
       getAlternativesForCatalog(
         initialSupplierId,
         initialCatalog.map((i) => i.id),
       )
         .then(setAlternatives)
         .catch(() => {});
+
+      // 2. Auto-agregar el ítem de la comparativa si viene en la URL
+      if (initialCatalogItemId) {
+        const item = initialCatalog.find((i) => i.id === initialCatalogItemId);
+        if (item) {
+          setCart([
+            {
+              catalogItemId: item.id,
+              supplierSku: item.supplier_sku,
+              productName: item.product_name,
+              brand: item.brand,
+              model: item.model,
+              category: item.category,
+              presentation: item.presentation,
+              color: item.color,
+              size: item.size,
+              unitCost: item.purchase_price,
+              quantity: 1,
+              notes: "",
+            },
+          ]);
+          setAutoAddMsg("Producto agregado desde comparativa de proveedores.");
+        }
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -358,6 +387,12 @@ export function NewPurchaseOrderView({
   return (
     <div className="space-y-6">
       {/* ── Feedback ────────────────────────────────────────────────────── */}
+      {autoAddMsg && (
+        <div className="flex items-center gap-2 rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-700 ring-1 ring-sky-100">
+          <span className="shrink-0">ℹ</span>
+          <span>{autoAddMsg}</span>
+        </div>
+      )}
       {error && (
         <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700 ring-1 ring-rose-100">
           {error}

@@ -9,10 +9,11 @@ import {
 export default async function NuevaOrdenCompraPage({
   searchParams,
 }: {
-  searchParams: Promise<{ supplierId?: string }>;
+  searchParams: Promise<{ supplierId?: string; catalogItemId?: string }>;
 }) {
   const params = await searchParams;
   const supplierId = params.supplierId ?? "";
+  const catalogItemId = params.catalogItemId ?? "";
 
   // Cargar proveedores activos y, si viene supplierId desde la URL, su catálogo
   const [suppliers, initialCatalog] = await Promise.all([
@@ -29,6 +30,7 @@ export default async function NuevaOrdenCompraPage({
         suppliers={suppliers}
         initialSupplierId={supplierId}
         initialCatalog={initialCatalog}
+        initialCatalogItemId={catalogItemId}
       />
     </DashboardPageShell>
   );
