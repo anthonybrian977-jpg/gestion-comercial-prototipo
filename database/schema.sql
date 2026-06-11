@@ -422,6 +422,10 @@ create policy authenticated_update_supplier_products
     )
   );
 
+-- Columna de SKU del proveedor (código interno del proveedor para la variante)
+alter table public.supplier_products
+  add column if not exists supplier_sku text;
+
 drop policy if exists authenticated_delete_supplier_products on public.supplier_products;
 
 create policy authenticated_delete_supplier_products
@@ -437,3 +441,144 @@ create policy authenticated_delete_supplier_products
         and is_active = true
     )
   );
+
+-- is_active en supplier_products (precio vigente o no para ese proveedor)
+alter table public.supplier_products
+  add column if not exists is_active boolean not null default true;
+
+-- Proveedor preferido por variante (determina el precio de compra en el maestro)
+alter table public.product_variants
+  add column if not exists preferred_supplier_product_id uuid
+    references public.supplier_products(id)
+    on delete set null;
+
+-- ---------------------------------------------------------------------------
+-- Tabla: supplier_catalog_items
+-- Catálogo de productos ofrecidos por cada proveedor (independiente del Maestro)
+-- Un item puede existir sin estar vinculado a products/product_variants.
+-- ---------------------------------------------------------------------------
+create table if not exists public.supplier_catalog_items (
+  id                  uuid primary key default gen_random_uuid(),
+  supplier_id         uuid not null references public.suppliers(id) on delete cascade,
+  supplier_sku        text,
+  product_name        text not null,
+  brand               text,
+  model               text,
+  category            text,
+  presentation        text,
+  color               text,
+  size                text,
+  purchase_price      numeric(12,2) not null,
+  is_active           boolean not null default true,
+  linked_product_id   uuid references public.products(id) on delete set null,
+  linked_variant_id   uuid references public.product_variants(id) on delete set null,
+  imported_to_master  boolean not null default false,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+alter table public.supplier_catalog_items enable row level security;
+
+drop policy if exists catalog_select on public.supplier_catalog_items;
+create policy catalog_select on public.supplier_catalog_items
+  for select to authenticated using (true);
+
+drop policy if exists catalog_insert on public.supplier_catalog_items;
+create policy catalog_insert on public.supplier_catalog_items
+  for insert to authenticated
+  with check (
+    exists (
+      select 1 from public.app_users
+      where auth_user_id = auth.uid() and role = 'admin' and is_active = true
+    )
+  );
+
+drop policy if exists catalog_update on public.supplier_catalog_items;
+create policy catalog_update on public.supplier_catalog_items
+  for update to authenticated
+  using (
+    exists (
+      select 1 from public.app_users
+      where auth_user_id = auth.uid() and role = 'admin' and is_active = true
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.app_users
+      where auth_user_id = auth.uid() and role = 'admin' and is_active = true
+    )
+  );
+
+drop policy if exists catalog_delete on public.supplier_catalog_items;
+create policy catalog_delete on public.supplier_catalog_items
+  for delete to authenticated
+  using (
+    exists (
+      select 1 from public.app_users
+      where auth_user_id = auth.uid() and role = 'admin' and is_active = true
+    )
+  );
+
+-- ===========================================================================
+-- MIGRACIÓN: supplier_products → supplier_catalog_items
+-- Seguro de ejecutar varias veces (idempotente).
+-- Ejecutar en el SQL Editor de Supabase DESPUÉS de crear supplier_catalog_items.
+-- ===========================================================================
+
+-- 1. Columna preferred_catalog_item_id en product_variants
+alter table public.product_variants
+  add column if not exists preferred_catalog_item_id uuid
+    references public.supplier_catalog_items(id) on delete set null;
+
+-- 2. Migrar filas de supplier_products → supplier_catalog_items
+--    Solo inserta las que aún no tienen un catalog_item con el mismo supplier+variant
+insert into public.supplier_catalog_items (
+  supplier_id,
+  supplier_sku,
+  product_name,
+  brand,
+  model,
+  category,
+  presentation,
+  color,
+  size,
+  purchase_price,
+  is_active,
+  linked_variant_id,
+  linked_product_id,
+  imported_to_master
+)
+select
+  sp.supplier_id,
+  sp.supplier_sku,
+  p.name                        as product_name,
+  p.brand,
+  p.model,
+  p.category,
+  pv.presentation,
+  pv.color,
+  pv.size,
+  sp.purchase_price,
+  coalesce(sp.is_active, true)  as is_active,
+  pv.id                         as linked_variant_id,
+  pv.product_id                 as linked_product_id,
+  true                          as imported_to_master
+from  public.supplier_products sp
+join  public.product_variants pv on pv.id = sp.variant_id
+join  public.products p          on p.id  = pv.product_id
+where not exists (
+  select 1
+  from   public.supplier_catalog_items sci
+  where  sci.supplier_id       = sp.supplier_id
+    and  sci.linked_variant_id = sp.variant_id
+);
+
+-- 3. Trasladar proveedor preferido: preferred_supplier_product_id → preferred_catalog_item_id
+update public.product_variants pv
+set    preferred_catalog_item_id = sci.id
+from   public.supplier_products sp
+join   public.supplier_catalog_items sci
+         on  sci.supplier_id       = sp.supplier_id
+         and sci.linked_variant_id = sp.variant_id
+where  pv.preferred_supplier_product_id = sp.id
+  and  pv.preferred_catalog_item_id is null;

@@ -171,6 +171,25 @@ export async function updateProduct(
             variantError.message ?? "No se pudo actualizar una variante.",
         };
       }
+
+      // Actualizar catálogo item preferido (columna puede no existir aún — fallo silencioso)
+      if (variant.preferredCatalogItemId !== undefined) {
+        await supabase
+          .from("product_variants")
+          .update({
+            preferred_catalog_item_id:
+              variant.preferredCatalogItemId ?? null,
+          })
+          .eq("id", variant.id)
+          .then(({ error: prefErr }) => {
+            if (prefErr) {
+              console.warn(
+                "[update-product] preferred_catalog_item_id:",
+                prefErr.message,
+              );
+            }
+          });
+      }
     }
 
     // Insertar nuevas variantes

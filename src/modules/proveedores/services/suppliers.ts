@@ -1,4 +1,9 @@
-import type { SupplierListItem, SupplierRecord } from "@/modules/proveedores/types";
+import type {
+  SupplierCatalogItem,
+  SupplierDetail,
+  SupplierListItem,
+  SupplierRecord,
+} from "@/modules/proveedores/types";
 
 type SpRow = {
   supplier_id: string;
@@ -53,4 +58,39 @@ export async function getSuppliersList(): Promise<SupplierListItem[]> {
     const st = stats.get(s.id) ?? { variant_count: 0, cheapest_count: 0 };
     return { ...s, ...st };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Detalle de un proveedor con su catálogo (Server Component)
+// ---------------------------------------------------------------------------
+
+export async function getSupplierDetail(
+  id: string,
+): Promise<SupplierDetail | null> {
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const [supplierResult, catalogResult] = await Promise.all([
+    supabase.from("suppliers").select("*").eq("id", id).single(),
+    supabase
+      .from("supplier_catalog_items")
+      .select("*")
+      .eq("supplier_id", id)
+      .order("product_name"),
+  ]);
+
+  if (supplierResult.error || !supplierResult.data) return null;
+
+  const supplier = supplierResult.data as SupplierRecord;
+
+  if (catalogResult.error) {
+    console.warn(
+      "[proveedores] supplier_catalog_items no disponible:",
+      catalogResult.error.message,
+    );
+  }
+
+  const catalog = (catalogResult.error ? [] : (catalogResult.data ?? [])) as SupplierCatalogItem[];
+
+  return { ...supplier, catalog };
 }

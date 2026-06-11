@@ -8,6 +8,8 @@ import {
 } from "@/modules/productos/utils/format";
 import { ProductDetailModal } from "@/modules/productos/components/ProductDetailModal";
 import { ProductCreateModal } from "@/modules/productos/components/ProductCreateModal";
+import { ProductImportModal } from "@/modules/productos/components/ProductImportModal";
+import { ImportFromSupplierModal } from "@/modules/productos/components/ImportFromSupplierModal";
 import { getProductImagePublicUrl } from "@/lib/supabase/upload-image";
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
 
@@ -50,6 +52,8 @@ export function ProductTable({ products }: ProductTableProps) {
   const [search, setSearch] = useState("");
   const [detailProduct, setDetailProduct] = useState<ProductListItem | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFromSupplierOpen, setImportFromSupplierOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const filteredProducts = useMemo(
@@ -70,10 +74,17 @@ export function ProductTable({ products }: ProductTableProps) {
           </button>
           <button
             type="button"
-            disabled
-            className="cursor-not-allowed rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-400"
+            onClick={() => setImportOpen(true)}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-800"
           >
-            Importar Excel · Próximamente
+            Importar Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => setImportFromSupplierOpen(true)}
+            className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700 shadow-sm transition hover:bg-emerald-100 hover:text-emerald-800"
+          >
+            Importar desde proveedor
           </button>
         </div>
 
@@ -207,6 +218,16 @@ export function ProductTable({ products }: ProductTableProps) {
       <ProductCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+      />
+
+      <ProductImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+      />
+
+      <ImportFromSupplierModal
+        open={importFromSupplierOpen}
+        onClose={() => setImportFromSupplierOpen(false)}
       />
 
       <ProductDetailModal

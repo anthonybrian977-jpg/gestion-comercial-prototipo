@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ProductListItem, VariantSupplierPrice } from "@/modules/productos/types";
 import { updateProduct } from "@/modules/productos/actions/update-product";
@@ -33,6 +33,10 @@ type VariantRow = {
   status: string;
   /** Path interno almacenado en BD. Ej: "variants/uuid.webp" */
   imagePath: string;
+  /** UUID de supplier_catalog_items seleccionado como proveedor de compra */
+  preferredCatalogItemId: string | null;
+  /** true cuando el usuario cambió el precio manualmente después de elegir proveedor */
+  isPriceManual: boolean;
 };
 
 type DetailForm = {
@@ -69,6 +73,8 @@ function initForm(product: ProductListItem): DetailForm {
       minStock: String(v.min_stock ?? 0),
       status: v.status,
       imagePath: v.image_path ?? "",
+      preferredCatalogItemId: v.preferred_catalog_item_id ?? null,
+      isPriceManual: false,
     })),
   };
 }
@@ -142,12 +148,26 @@ function VariantImageCell({
   );
 }
 
-const HEADERS = [
+const VIEW_HEADERS = [
   "SKU",
   "Presentación",
   "Color",
   "Talla",
   "Precio compra",
+  "Precio venta",
+  "Stock",
+  "Stock mín.",
+  "Estado",
+  "Imagen",
+];
+
+const EDIT_HEADERS = [
+  "SKU",
+  "Presentación",
+  "Color",
+  "Talla",
+  "Precio compra",
+  "Proveedor compra",
   "Precio venta",
   "Stock",
   "Stock mín.",
@@ -200,7 +220,7 @@ export function ProductDetailModal({
     }
   }, [product]);
 
-  // Cargar precios por proveedor cuando cambia el producto
+  // Cargar precios por proveedor cuando cambia el producto (lee supplier_catalog_items)
   useEffect(() => {
     if (!product) {
       setSupplierPrices(null);
@@ -215,44 +235,50 @@ export function ProductDetailModal({
 
     const supabase = createClient();
     supabase
-      .from("supplier_products")
-      .select("variant_id, purchase_price, suppliers(id, name)")
-      .in("variant_id", variantIds)
+      .from("supplier_catalog_items")
+      .select("id, linked_variant_id, purchase_price, is_active, suppliers(id, name)")
+      .in("linked_variant_id", variantIds)
+      .eq("imported_to_master", true)
       .then(({ data, error: fetchError }) => {
         if (fetchError || !data) {
           setSupplierPrices([]);
           return;
         }
 
-        type SpPriceRow = {
-          variant_id: string;
+        type CatalogPriceRow = {
+          id: string;
+          linked_variant_id: string;
           purchase_price: number;
+          is_active: boolean | null;
           suppliers: { id: string; name: string } | null;
         };
 
-        const rows = data as unknown as SpPriceRow[];
+        const rows = data as unknown as CatalogPriceRow[];
+
+        // Solo precios activos y con proveedor válido
+        const activeRows = rows.filter(
+          (r) => r.is_active !== false && r.suppliers !== null,
+        );
 
         // Calcular precio mínimo por variante
         const minByVariant = new Map<string, number>();
-        for (const row of rows) {
-          if (!row.suppliers) continue;
-          const current = minByVariant.get(row.variant_id);
+        for (const row of activeRows) {
+          const current = minByVariant.get(row.linked_variant_id);
           if (current === undefined || row.purchase_price < current) {
-            minByVariant.set(row.variant_id, row.purchase_price);
+            minByVariant.set(row.linked_variant_id, row.purchase_price);
           }
         }
 
-        const prices: VariantSupplierPrice[] = rows
-          .filter((row) => row.suppliers !== null)
-          .map((row) => ({
-            variant_id: row.variant_id,
-            supplier_id: row.suppliers!.id,
-            supplier_name: row.suppliers!.name,
-            purchase_price: row.purchase_price,
-            is_best:
-              row.purchase_price <=
-              (minByVariant.get(row.variant_id) ?? Infinity),
-          }));
+        const prices: VariantSupplierPrice[] = activeRows.map((row) => ({
+          catalog_item_id: row.id,
+          variant_id: row.linked_variant_id,
+          supplier_id: row.suppliers!.id,
+          supplier_name: row.suppliers!.name,
+          purchase_price: row.purchase_price,
+          is_best:
+            row.purchase_price <=
+            (minByVariant.get(row.linked_variant_id) ?? Infinity),
+        }));
 
         setSupplierPrices(prices);
       });
@@ -271,6 +297,18 @@ export function ProductDetailModal({
         URL.revokeObjectURL(url);
     };
   }, [variantImagePreviews]);
+
+  /** Opciones de proveedor agrupadas por variant_id (solo activas). */
+  const supplierOptsByVariant = useMemo(() => {
+    if (!supplierPrices) return new Map<string, VariantSupplierPrice[]>();
+    const map = new Map<string, VariantSupplierPrice[]>();
+    for (const sp of supplierPrices) {
+      const arr = map.get(sp.variant_id) ?? [];
+      arr.push(sp);
+      map.set(sp.variant_id, arr);
+    }
+    return map;
+  }, [supplierPrices]);
 
   if (!product || !form) return null;
 
@@ -307,6 +345,19 @@ export function ProductDetailModal({
     );
   }
 
+  function setVariantPartial(tempId: string, partial: Partial<VariantRow>) {
+    setForm((c) =>
+      c
+        ? {
+            ...c,
+            variants: c.variants.map((v) =>
+              v.tempId === tempId ? { ...v, ...partial } : v,
+            ),
+          }
+        : c,
+    );
+  }
+
   function addVariant() {
     const newRow: VariantRow = {
       tempId: crypto.randomUUID(),
@@ -321,6 +372,8 @@ export function ProductDetailModal({
       minStock: "0",
       status: "active",
       imagePath: "",
+      preferredCatalogItemId: null,
+      isPriceManual: false,
     };
     setForm((c) => (c ? { ...c, variants: [...c.variants, newRow] } : c));
   }
@@ -415,6 +468,7 @@ export function ProductDetailModal({
         status: v.status,
         imagePath:
           resolvedVariantPaths.get(v.tempId) ?? (v.imagePath || undefined), // path interno
+        preferredCatalogItemId: v.preferredCatalogItemId,
       })),
       newVariants: created.map((v) => ({
         sku: v.sku || undefined,
@@ -691,7 +745,7 @@ export function ProductDetailModal({
               <table className="min-w-full divide-y divide-slate-100">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
-                    {HEADERS.map((h) => (
+                    {(isEdit ? EDIT_HEADERS : VIEW_HEADERS).map((h) => (
                       <th
                         key={h}
                         className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
@@ -778,15 +832,77 @@ export function ProductDetailModal({
                             step="0.01"
                             required
                             value={v.purchasePrice}
-                            onChange={(e) =>
-                              setVariantField(
-                                v.tempId,
-                                "purchasePrice",
-                                e.target.value,
-                              )
-                            }
-                            className={cellInput}
+                            onChange={(e) => {
+                              const opts = v.dbId
+                                ? (supplierOptsByVariant.get(v.dbId) ?? [])
+                                : [];
+                              setVariantPartial(v.tempId, {
+                                purchasePrice: e.target.value,
+                                isPriceManual:
+                                  opts.length > 0 &&
+                                  !!v.preferredCatalogItemId,
+                              });
+                            }}
+                            className={`${cellInput} ${v.isPriceManual ? "border-amber-300 ring-1 ring-amber-100" : ""}`}
                           />
+                          {v.isPriceManual && (
+                            <div className="mt-0.5 text-[10px] text-amber-600">
+                              precio manual
+                            </div>
+                          )}
+                        </td>
+                        {/* Proveedor compra */}
+                        <td className="px-3 py-2">
+                          {(() => {
+                            const opts = v.dbId
+                              ? (supplierOptsByVariant.get(v.dbId) ?? [])
+                              : [];
+                            if (opts.length === 0)
+                              return (
+                                <span className="text-xs text-slate-400">
+                                  —
+                                </span>
+                              );
+                            return (
+                              <select
+                                value={v.preferredCatalogItemId ?? ""}
+                                onChange={(e) => {
+                                  const selectedId = e.target.value;
+                                  const opt = opts.find(
+                                    (o) =>
+                                      o.catalog_item_id === selectedId,
+                                  );
+                                  setVariantPartial(v.tempId, {
+                                    preferredCatalogItemId:
+                                      selectedId || null,
+                                    purchasePrice: opt
+                                      ? String(opt.purchase_price)
+                                      : v.purchasePrice,
+                                    isPriceManual: false,
+                                  });
+                                }}
+                                className={cellInput}
+                              >
+                                <option value="">— Manual —</option>
+                                {opts
+                                  .slice()
+                                  .sort(
+                                    (a, b) =>
+                                      a.purchase_price - b.purchase_price,
+                                  )
+                                  .map((opt) => (
+                                    <option
+                                      key={opt.catalog_item_id}
+                                      value={opt.catalog_item_id}
+                                    >
+                                      {opt.supplier_name} ·{" "}
+                                      {formatCurrency(opt.purchase_price)}
+                                      {opt.is_best ? " ★" : ""}
+                                    </option>
+                                  ))}
+                              </select>
+                            );
+                          })()}
                         </td>
                         {/* Precio venta */}
                         <td className="px-3 py-2">
@@ -886,8 +1002,30 @@ export function ProductDetailModal({
                         <td className="px-4 py-3 text-sm text-slate-600">
                           {v.size || "—"}
                         </td>
-                        <td className="px-4 py-3 text-sm text-slate-600">
-                          {formatCurrency(Number(v.purchasePrice))}
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-slate-600">
+                            {formatCurrency(Number(v.purchasePrice))}
+                          </div>
+                          {(() => {
+                            const opts = v.dbId
+                              ? (supplierOptsByVariant.get(v.dbId) ?? [])
+                              : [];
+                            if (opts.length === 0) return null;
+                            const tag = v.preferredCatalogItemId
+                              ? opts.find(
+                                  (o) =>
+                                    o.catalog_item_id ===
+                                    v.preferredCatalogItemId,
+                                )
+                              : opts.find((o) => o.is_best);
+                            if (!tag) return null;
+                            return (
+                              <div className="mt-0.5 text-[10px] text-slate-400">
+                                {tag.supplier_name}
+                                {tag.is_best ? " · Mejor precio" : ""}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-600">
                           {formatCurrency(Number(v.salePrice))}

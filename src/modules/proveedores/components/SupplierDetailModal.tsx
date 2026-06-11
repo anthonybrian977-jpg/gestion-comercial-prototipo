@@ -16,6 +16,7 @@ import { formatCurrency } from "@/modules/productos/utils/format";
 type SpJoinRow = {
   id: string;
   purchase_price: number;
+  supplier_sku: string | null;
   variant_id: string;
   product_variants: {
     id: string;
@@ -48,6 +49,7 @@ async function fetchSupplierGroups(
       `
       id,
       purchase_price,
+      supplier_sku,
       variant_id,
       product_variants (
         id,
@@ -83,6 +85,8 @@ async function fetchSupplierGroups(
       supplier_product_id: row.id,
       variant_id: row.variant_id,
       sku: pv.sku,
+      supplier_sku: row.supplier_sku,
+      is_active: true, // SupplierDetailModal (legacy) no selecciona is_active; default true
       color: pv.color,
       size: pv.size,
       presentation: pv.presentation,

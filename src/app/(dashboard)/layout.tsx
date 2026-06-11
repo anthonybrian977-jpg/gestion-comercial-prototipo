@@ -24,9 +24,9 @@ export default async function DashboardLayout({
   return (
     <UserProfileProvider profile={profile}>
       <AuthGuard>
-        <div className="flex min-h-screen bg-slate-100">
+        <div className="flex h-screen overflow-hidden bg-slate-100">
           <Sidebar />
-          <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
         </div>
       </AuthGuard>
     </UserProfileProvider>

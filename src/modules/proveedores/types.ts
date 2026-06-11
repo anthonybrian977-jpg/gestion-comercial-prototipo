@@ -23,6 +23,8 @@ export type SupplierVariantItem = {
   supplier_product_id: string;
   variant_id: string;
   sku: string;
+  /** Código interno del proveedor para esta variante (opcional). */
+  supplier_sku: string | null;
   color: string | null;
   size: string | null;
   presentation: string | null;
@@ -31,6 +33,8 @@ export type SupplierVariantItem = {
   product_brand: string | null;
   product_category: string | null;
   purchase_price: number;
+  /** Si false, el precio de este proveedor está desactivado. */
+  is_active: boolean;
 };
 
 /** Grupo de variantes del mismo producto padre, dentro del detalle de un proveedor. */
@@ -42,7 +46,29 @@ export type SupplierProductGroup = {
   variants: SupplierVariantItem[];
 };
 
-/** Detalle completo de un proveedor con sus productos agrupados. */
+/** Item del catálogo de un proveedor (puede no existir en el Maestro). */
+export type SupplierCatalogItem = {
+  id: string;
+  supplier_id: string;
+  supplier_sku: string | null;
+  product_name: string;
+  brand: string | null;
+  model: string | null;
+  category: string | null;
+  presentation: string | null;
+  color: string | null;
+  size: string | null;
+  purchase_price: number;
+  is_active: boolean;
+  linked_product_id: string | null;
+  linked_variant_id: string | null;
+  imported_to_master: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Detalle completo de un proveedor con su catálogo. */
 export type SupplierDetail = SupplierRecord & {
-  groups: SupplierProductGroup[];
+  /** Catálogo de productos del proveedor (tabla supplier_catalog_items). */
+  catalog: SupplierCatalogItem[];
 };
