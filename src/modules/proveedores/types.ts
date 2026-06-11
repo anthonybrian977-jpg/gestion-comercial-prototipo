@@ -12,12 +12,14 @@ export type SupplierRecord = {
 
 /** Proveedor enriquecido con estadísticas calculadas para el listado. */
 export type SupplierListItem = SupplierRecord & {
-  /** Total de productos en el catálogo del proveedor. */
+  /** Total de ítems en el catálogo del proveedor. */
   catalog_count: number;
-  /** Productos del catálogo ya importados al Maestro. */
-  imported_count: number;
-  /** Productos del catálogo pendientes de importar. */
-  pending_count: number;
+  /** Ítems mapeados al Maestro (linked_variant_id not null). */
+  mapped_count: number;
+  /** Ítems elegidos actualmente por alguna variante (preferred_catalog_item_id apunta aquí). */
+  elected_count: number;
+  /** Ítems sin ningún vínculo al Maestro. */
+  solo_catalog_count: number;
 };
 
 /** Variante de producto dentro del detalle de un proveedor. */
@@ -73,4 +75,6 @@ export type SupplierCatalogItem = {
 export type SupplierDetail = SupplierRecord & {
   /** Catálogo de productos del proveedor (tabla supplier_catalog_items). */
   catalog: SupplierCatalogItem[];
+  /** IDs de catalog items que tienen preferred_catalog_item_id apuntando a ellos (elegidos). */
+  elected_catalog_item_ids: string[];
 };

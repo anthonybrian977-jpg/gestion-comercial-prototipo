@@ -54,8 +54,9 @@ export function SupplierTable({ suppliers }: SupplierTableProps) {
                     "Teléfono",
                     "Email",
                     "En catálogo",
-                    "Vinculados",
-                    "Sin vincular",
+                    "Mapeados",
+                    "Elegidos",
+                    "Solo catálogo",
                     "Estado",
                     "Acciones",
                   ].map((header) => (
@@ -101,18 +102,27 @@ export function SupplierTable({ suppliers }: SupplierTableProps) {
                       )}
                     </td>
                     <td className="px-4 py-4">
-                      {supplier.imported_count > 0 ? (
-                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-100">
-                          {supplier.imported_count}
+                      {supplier.mapped_count > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-100">
+                          {supplier.mapped_count}
                         </span>
                       ) : (
                         <span className="text-slate-400">0</span>
                       )}
                     </td>
                     <td className="px-4 py-4">
-                      {supplier.pending_count > 0 ? (
-                        <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-100">
-                          {supplier.pending_count}
+                      {supplier.elected_count > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-100">
+                          {supplier.elected_count}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">0</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4">
+                      {supplier.solo_catalog_count > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+                          {supplier.solo_catalog_count}
                         </span>
                       ) : (
                         <span className="text-slate-400">0</span>

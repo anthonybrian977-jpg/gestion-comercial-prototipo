@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { SupplierCatalogItem, SupplierDetail } from "@/modules/proveedores/types";
 import { formatCurrency } from "@/modules/productos/utils/format";
 import { EditSupplierModal } from "@/modules/proveedores/components/EditSupplierModal";
@@ -9,6 +10,7 @@ import { AddCatalogItemModal } from "@/modules/proveedores/components/AddCatalog
 import { EditCatalogItemModal } from "@/modules/proveedores/components/EditCatalogItemModal";
 import { ImportToMasterModal } from "@/modules/proveedores/components/ImportToMasterModal";
 import { SupplierImportModal } from "@/modules/proveedores/components/SupplierImportModal";
+import { deleteCatalogItemsBulk } from "@/modules/proveedores/actions/catalog-actions";
 
 // ---------------------------------------------------------------------------
 // Filtro de búsqueda sobre el catálogo
@@ -25,17 +27,32 @@ function filterCatalog(items: SupplierCatalogItem[], query: string): SupplierCat
 }
 
 // ---------------------------------------------------------------------------
-// Badge de estado de importación
+// Badge de estado (3 estados)
 // ---------------------------------------------------------------------------
 
-function ImportedBadge({ imported }: { imported: boolean }) {
-  return imported ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100">
-      ✓ Vinculado
-    </span>
-  ) : (
+/**
+ * Elegido   → preferred_catalog_item_id de alguna variante apunta a este item
+ * Mapeado   → linked_variant_id not null, pero no elegido
+ * Solo cat. → sin vínculo al Maestro
+ */
+function StatusBadge({ elected, mapped }: { elected: boolean; mapped: boolean }) {
+  if (elected) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100">
+        ★ Elegido
+      </span>
+    );
+  }
+  if (mapped) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-0.5 text-[11px] font-medium text-sky-700 ring-1 ring-sky-100">
+        Mapeado
+      </span>
+    );
+  }
+  return (
     <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
-      Sin vincular
+      Solo catálogo
     </span>
   );
 }
@@ -45,6 +62,7 @@ function ImportedBadge({ imported }: { imported: boolean }) {
 // ---------------------------------------------------------------------------
 
 export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
 
   const [editOpen, setEditOpen] = useState(false);
@@ -53,10 +71,77 @@ export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
   const [importToMasterItem, setImportToMasterItem] = useState<SupplierCatalogItem | null>(null);
   const [importOpen, setImportOpen] = useState(false);
 
+  // ── Selección para limpieza ────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [cleaning, setCleaning] = useState(false);
+
+  // Set de IDs de catálogo elegidos por alguna variante
+  const electedSet = useMemo(
+    () => new Set(supplier.elected_catalog_item_ids),
+    [supplier.elected_catalog_item_ids],
+  );
+
   const filteredCatalog = useMemo(
     () => filterCatalog(supplier.catalog, search),
     [search, supplier.catalog],
   );
+
+  // ── Helpers de selección ──────────────────────────────────────────────────
+  const allVisibleSelected =
+    filteredCatalog.length > 0 &&
+    filteredCatalog.every((item) => selectedIds.has(item.id));
+
+  const someSelected = selectedIds.size > 0;
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredCatalog.forEach((item) => next.delete(item.id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredCatalog.forEach((item) => next.add(item.id));
+        return next;
+      });
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  async function handleCleanup() {
+    if (selectedIds.size === 0) return;
+    const n = selectedIds.size;
+    const confirmed = window.confirm(
+      `¿Eliminar definitivamente ${n} ítem${n !== 1 ? "s" : ""} del catálogo?\n\nSi alguno está vinculado al Maestro, ese vínculo se perderá. Esta acción no se puede deshacer.`,
+    );
+    if (!confirmed) return;
+
+    setCleaning(true);
+    const result = await deleteCatalogItemsBulk(supplier.id, [...selectedIds]);
+    setCleaning(false);
+
+    if (!result.success) {
+      alert("Error: " + result.message);
+      return;
+    }
+
+    clearSelection();
+    router.refresh();
+  }
 
   return (
     <>
@@ -111,32 +196,60 @@ export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
         </div>
       ) : null}
 
-      {/* ── Action bar ───────────────────────────────────────────────── */}
-      <div className="mb-5 flex flex-wrap items-center gap-3">
-        <div className="min-w-[200px] flex-1">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por producto, SKU, marca, categoría…"
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
-          />
+      {/* ── Barra de selección (aparece cuando hay ítems seleccionados) ── */}
+      {someSelected && (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5">
+          <span className="text-sm font-medium text-rose-800">
+            {selectedIds.size} ítem{selectedIds.size !== 1 ? "s" : ""} seleccionado{selectedIds.size !== 1 ? "s" : ""}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleCleanup}
+              disabled={cleaning}
+              className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+            >
+              {cleaning ? "Eliminando..." : `🗑 Eliminar ${selectedIds.size}`}
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setAddCatalogOpen(true)}
-          className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-800"
-        >
-          + Agregar al catálogo
-        </button>
-        <button
-          type="button"
-          onClick={() => setImportOpen(true)}
-          className="rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-700"
-        >
-          Importar Excel
-        </button>
-      </div>
+      )}
+
+      {/* ── Action bar ───────────────────────────────────────────────── */}
+      {!someSelected && (
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <div className="min-w-[200px] flex-1">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por producto, SKU, marca, categoría…"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setAddCatalogOpen(true)}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-800"
+          >
+            + Agregar al catálogo
+          </button>
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-700"
+          >
+            Importar Excel
+          </button>
+        </div>
+      )}
 
       {/* ── Catalog table ─────────────────────────────────────────────── */}
       {supplier.catalog.length === 0 ? (
@@ -168,7 +281,17 @@ export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
             <table className="min-w-full divide-y divide-slate-100">
               <thead className="bg-slate-50">
                 <tr>
-                  {["SKU prov.", "Producto", "Marca", "Cat.", "Color", "Talla", "Presentación", "Precio compra", "Estado", "Vínculo", ""].map((h, i) => (
+                  {/* Checkbox seleccionar todos */}
+                  <th className="w-10 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4 rounded border-slate-300 accent-rose-600 cursor-pointer"
+                      title={allVisibleSelected ? "Deseleccionar todos" : "Seleccionar todos"}
+                    />
+                  </th>
+                  {["SKU prov.", "Producto", "Marca", "Cat.", "Color", "Talla", "Presentación", "Precio compra", "Estado", "En Maestro", ""].map((h, i) => (
                     <th key={i} className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                       {h}
                     </th>
@@ -179,8 +302,21 @@ export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
                 {filteredCatalog.map((item) => (
                   <tr
                     key={item.id}
-                    className={`transition hover:bg-slate-50/50 ${!item.is_active ? "opacity-60" : ""}`}
+                    className={[
+                      "transition",
+                      selectedIds.has(item.id) ? "bg-rose-50/60" : "hover:bg-slate-50/50",
+                      !item.is_active && !selectedIds.has(item.id) ? "opacity-60" : "",
+                    ].filter(Boolean).join(" ")}
                   >
+                    {/* Checkbox de fila */}
+                    <td className="w-10 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleSelect(item.id)}
+                        className="h-4 w-4 rounded border-slate-300 accent-rose-600 cursor-pointer"
+                      />
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">
                       {item.supplier_sku ?? <span className="text-slate-300">—</span>}
                     </td>
@@ -204,7 +340,10 @@ export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <ImportedBadge imported={item.imported_to_master} />
+                      <StatusBadge
+                        elected={electedSet.has(item.id)}
+                        mapped={item.linked_variant_id !== null}
+                      />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -215,7 +354,7 @@ export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
                         >
                           Editar
                         </button>
-                        {!item.imported_to_master && (
+                        {item.linked_variant_id === null && (
                           <button
                             type="button"
                             onClick={() => setImportToMasterItem(item)}

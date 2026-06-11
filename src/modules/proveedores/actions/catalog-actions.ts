@@ -353,3 +353,53 @@ export async function importCatalogItemToMaster(
     variantId: newVariant.id,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Eliminar ítems del catálogo (bulk hard delete)
+// ---------------------------------------------------------------------------
+export type DeleteCatalogItemsResult = {
+  success: boolean;
+  message: string;
+  deleted: number;
+};
+
+export async function deleteCatalogItemsBulk(
+  supplierId: string,
+  itemIds: string[],
+): Promise<DeleteCatalogItemsResult> {
+  if (itemIds.length === 0) {
+    return { success: false, message: "No hay ítems seleccionados.", deleted: 0 };
+  }
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  // Limpiar preferred_catalog_item_id en variantes que apunten a estos items
+  await supabase
+    .from("product_variants")
+    .update({ preferred_catalog_item_id: null })
+    .in("preferred_catalog_item_id", itemIds);
+
+  // Borrar los ítems del catálogo
+  const { error, count } = await supabase
+    .from("supplier_catalog_items")
+    .delete({ count: "exact" })
+    .in("id", itemIds)
+    .eq("supplier_id", supplierId); // seguridad: solo del proveedor correcto
+
+  if (error) {
+    return {
+      success: false,
+      message: "Error al eliminar ítems: " + error.message,
+      deleted: 0,
+    };
+  }
+
+  revalidatePaths(supplierId);
+
+  return {
+    success: true,
+    message: `${count ?? itemIds.length} ítem(s) eliminado(s) del catálogo.`,
+    deleted: count ?? itemIds.length,
+  };
+}

@@ -115,6 +115,4 @@ export type VariantSupplierPrice = {
   supplier_id: string;
   supplier_name: string;
   purchase_price: number;
-  /** true si este es el precio más bajo entre todos los proveedores para esa variante. */
-  is_best: boolean;
 };

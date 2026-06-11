@@ -4,6 +4,8 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "re
 import { useRouter } from "next/navigation";
 import type { ProductListItem, VariantSupplierPrice } from "@/modules/productos/types";
 import { updateProduct } from "@/modules/productos/actions/update-product";
+import { deactivateProduct, reactivateProduct } from "@/modules/productos/actions/deactivate-product";
+import { archiveProduct, restoreProduct } from "@/modules/productos/actions/archive-product";
 import {
   uploadProductImage,
   getProductImagePublicUrl,
@@ -33,10 +35,8 @@ type VariantRow = {
   status: string;
   /** Path interno almacenado en BD. Ej: "variants/uuid.webp" */
   imagePath: string;
-  /** UUID de supplier_catalog_items seleccionado como proveedor de compra */
+  /** UUID de supplier_catalog_items que originó esta variante (solo informativo) */
   preferredCatalogItemId: string | null;
-  /** true cuando el usuario cambió el precio manualmente después de elegir proveedor */
-  isPriceManual: boolean;
 };
 
 type DetailForm = {
@@ -74,7 +74,6 @@ function initForm(product: ProductListItem): DetailForm {
       status: v.status,
       imagePath: v.image_path ?? "",
       preferredCatalogItemId: v.preferred_catalog_item_id ?? null,
-      isPriceManual: false,
     })),
   };
 }
@@ -167,7 +166,7 @@ const EDIT_HEADERS = [
   "Color",
   "Talla",
   "Precio compra",
-  "Proveedor compra",
+  "Proveedor origen",
   "Precio venta",
   "Stock",
   "Stock mín.",
@@ -191,6 +190,8 @@ export function ProductDetailModal({
   const [form, setForm] = useState<DetailForm | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  /** Acción de estado en curso: "deactivate" | "reactivate" | "archive" | "restore" | null */
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -260,24 +261,12 @@ export function ProductDetailModal({
           (r) => r.is_active !== false && r.suppliers !== null,
         );
 
-        // Calcular precio mínimo por variante
-        const minByVariant = new Map<string, number>();
-        for (const row of activeRows) {
-          const current = minByVariant.get(row.linked_variant_id);
-          if (current === undefined || row.purchase_price < current) {
-            minByVariant.set(row.linked_variant_id, row.purchase_price);
-          }
-        }
-
         const prices: VariantSupplierPrice[] = activeRows.map((row) => ({
           catalog_item_id: row.id,
           variant_id: row.linked_variant_id,
           supplier_id: row.suppliers!.id,
           supplier_name: row.suppliers!.name,
           purchase_price: row.purchase_price,
-          is_best:
-            row.purchase_price <=
-            (minByVariant.get(row.linked_variant_id) ?? Infinity),
         }));
 
         setSupplierPrices(prices);
@@ -345,19 +334,6 @@ export function ProductDetailModal({
     );
   }
 
-  function setVariantPartial(tempId: string, partial: Partial<VariantRow>) {
-    setForm((c) =>
-      c
-        ? {
-            ...c,
-            variants: c.variants.map((v) =>
-              v.tempId === tempId ? { ...v, ...partial } : v,
-            ),
-          }
-        : c,
-    );
-  }
-
   function addVariant() {
     const newRow: VariantRow = {
       tempId: crypto.randomUUID(),
@@ -373,7 +349,6 @@ export function ProductDetailModal({
       status: "active",
       imagePath: "",
       preferredCatalogItemId: null,
-      isPriceManual: false,
     };
     setForm((c) => (c ? { ...c, variants: [...c.variants, newRow] } : c));
   }
@@ -407,6 +382,41 @@ export function ProductDetailModal({
     setVariantImagePreviews((m) =>
       new Map(m).set(tempId, URL.createObjectURL(file)), // blob URL, solo preview
     );
+  }
+
+  // ── status actions ─────────────────────────────────────────────────────────
+
+  async function handleStatusAction(
+    action: "deactivate" | "reactivate" | "archive" | "restore",
+  ) {
+    if (!product) return;
+
+    const confirmMessages: Record<string, string> = {
+      deactivate: `¿Inactivar "${product.name}"?\n\nEl producto no aparecerá en la lista de activos. Podrás reactivarlo desde la pestaña "Inactivos".`,
+      reactivate: `¿Reactivar "${product.name}"?\n\nEl producto volverá a aparecer en la lista de activos.`,
+      archive: `¿Eliminar "${product.name}" de la lista?\n\nEl producto pasará a la pestaña "Archivados". No se borran datos y puedes restaurarlo.`,
+      restore: `¿Restaurar "${product.name}"?\n\nEl producto volverá a la lista de activos.`,
+    };
+
+    if (!window.confirm(confirmMessages[action])) return;
+
+    setActionLoading(action);
+    setError("");
+
+    let result: { success: boolean; message: string };
+    if (action === "deactivate") result = await deactivateProduct(product.id);
+    else if (action === "reactivate") result = await reactivateProduct(product.id);
+    else if (action === "archive") result = await archiveProduct(product.id);
+    else result = await restoreProduct(product.id);
+
+    setActionLoading(null);
+
+    if (!result.success) {
+      setError(result.message);
+      return;
+    }
+    router.refresh();
+    onClose();
   }
 
   // ── submit ────────────────────────────────────────────────────────────────
@@ -710,11 +720,7 @@ export function ProductDetailModal({
                             .map((sp) => (
                               <div
                                 key={sp.supplier_id}
-                                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs ${
-                                  sp.is_best
-                                    ? "border-emerald-200 bg-emerald-50"
-                                    : "border-slate-200 bg-slate-50"
-                                }`}
+                                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs"
                               >
                                 <span className="font-medium text-slate-800">
                                   {sp.supplier_name}
@@ -722,11 +728,6 @@ export function ProductDetailModal({
                                 <span className="text-slate-500">
                                   {formatCurrency(sp.purchase_price)}
                                 </span>
-                                {sp.is_best ? (
-                                  <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                                    Mejor precio
-                                  </span>
-                                ) : null}
                               </div>
                             ))}
                         </div>
@@ -832,75 +833,44 @@ export function ProductDetailModal({
                             step="0.01"
                             required
                             value={v.purchasePrice}
-                            onChange={(e) => {
-                              const opts = v.dbId
-                                ? (supplierOptsByVariant.get(v.dbId) ?? [])
-                                : [];
-                              setVariantPartial(v.tempId, {
-                                purchasePrice: e.target.value,
-                                isPriceManual:
-                                  opts.length > 0 &&
-                                  !!v.preferredCatalogItemId,
-                              });
-                            }}
-                            className={`${cellInput} ${v.isPriceManual ? "border-amber-300 ring-1 ring-amber-100" : ""}`}
+                            onChange={(e) =>
+                              setVariantField(
+                                v.tempId,
+                                "purchasePrice",
+                                e.target.value,
+                              )
+                            }
+                            className={cellInput}
                           />
-                          {v.isPriceManual && (
-                            <div className="mt-0.5 text-[10px] text-amber-600">
-                              precio manual
-                            </div>
-                          )}
                         </td>
-                        {/* Proveedor compra */}
+                        {/* Proveedor origen — solo informativo, no editable */}
                         <td className="px-3 py-2">
                           {(() => {
+                            if (!v.preferredCatalogItemId) {
+                              return (
+                                <span className="text-xs text-slate-400">
+                                  Agregado manualmente
+                                </span>
+                              );
+                            }
                             const opts = v.dbId
                               ? (supplierOptsByVariant.get(v.dbId) ?? [])
                               : [];
-                            if (opts.length === 0)
-                              return (
-                                <span className="text-xs text-slate-400">
-                                  —
-                                </span>
-                              );
-                            return (
-                              <select
-                                value={v.preferredCatalogItemId ?? ""}
-                                onChange={(e) => {
-                                  const selectedId = e.target.value;
-                                  const opt = opts.find(
-                                    (o) =>
-                                      o.catalog_item_id === selectedId,
-                                  );
-                                  setVariantPartial(v.tempId, {
-                                    preferredCatalogItemId:
-                                      selectedId || null,
-                                    purchasePrice: opt
-                                      ? String(opt.purchase_price)
-                                      : v.purchasePrice,
-                                    isPriceManual: false,
-                                  });
-                                }}
-                                className={cellInput}
-                              >
-                                <option value="">— Manual —</option>
-                                {opts
-                                  .slice()
-                                  .sort(
-                                    (a, b) =>
-                                      a.purchase_price - b.purchase_price,
-                                  )
-                                  .map((opt) => (
-                                    <option
-                                      key={opt.catalog_item_id}
-                                      value={opt.catalog_item_id}
-                                    >
-                                      {opt.supplier_name} ·{" "}
-                                      {formatCurrency(opt.purchase_price)}
-                                      {opt.is_best ? " ★" : ""}
-                                    </option>
-                                  ))}
-                              </select>
+                            const sp = opts.find(
+                              (o) =>
+                                o.catalog_item_id === v.preferredCatalogItemId,
+                            );
+                            return sp ? (
+                              <div>
+                                <p className="text-xs font-medium text-slate-700">
+                                  {sp.supplier_name}
+                                </p>
+                                <p className="text-[10px] text-slate-400">
+                                  {formatCurrency(sp.purchase_price)}
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
                             );
                           })()}
                         </td>
@@ -1007,22 +977,17 @@ export function ProductDetailModal({
                             {formatCurrency(Number(v.purchasePrice))}
                           </div>
                           {(() => {
+                            if (!v.preferredCatalogItemId) return null;
                             const opts = v.dbId
                               ? (supplierOptsByVariant.get(v.dbId) ?? [])
                               : [];
-                            if (opts.length === 0) return null;
-                            const tag = v.preferredCatalogItemId
-                              ? opts.find(
-                                  (o) =>
-                                    o.catalog_item_id ===
-                                    v.preferredCatalogItemId,
-                                )
-                              : opts.find((o) => o.is_best);
+                            const tag = opts.find(
+                              (o) => o.catalog_item_id === v.preferredCatalogItemId,
+                            );
                             if (!tag) return null;
                             return (
                               <div className="mt-0.5 text-[10px] text-slate-400">
                                 {tag.supplier_name}
-                                {tag.is_best ? " · Mejor precio" : ""}
                               </div>
                             );
                           })()}
@@ -1103,21 +1068,82 @@ export function ProductDetailModal({
                 </div>
               </div>
             ) : (
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Cerrar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode("edit")}
-                  className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700"
-                >
-                  Editar
-                </button>
+              <div className="flex flex-col gap-3">
+                {/* Botones de acción según estado */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex gap-2">
+                    {product?.status === "active" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusAction("deactivate")}
+                          disabled={!!actionLoading}
+                          className="rounded-xl border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {actionLoading === "deactivate" ? "..." : "Inactivar"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusAction("archive")}
+                          disabled={!!actionLoading}
+                          className="rounded-xl border border-rose-200 px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {actionLoading === "archive" ? "..." : "Eliminar de lista"}
+                        </button>
+                      </>
+                    )}
+                    {product?.status === "inactive" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusAction("reactivate")}
+                          disabled={!!actionLoading}
+                          className="rounded-xl border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {actionLoading === "reactivate" ? "..." : "Reactivar"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusAction("archive")}
+                          disabled={!!actionLoading}
+                          className="rounded-xl border border-rose-200 px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {actionLoading === "archive" ? "..." : "Eliminar de lista"}
+                        </button>
+                      </>
+                    )}
+                    {product?.status === "archived" && (
+                      <button
+                        type="button"
+                        onClick={() => handleStatusAction("restore")}
+                        disabled={!!actionLoading}
+                        className="rounded-xl border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {actionLoading === "restore" ? "..." : "Restaurar"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Cerrar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMode("edit")}
+                      className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700"
+                    >
+                      Editar
+                    </button>
+                  </div>
+                </div>
+                {/* Nota conceptual sobre proveedor */}
+                <p className="text-[11px] text-slate-400">
+                  El proveedor se define en el flujo de compra (Orden de Compra → Ingreso de Mercadería), no desde Maestro.
+                </p>
               </div>
             )}
           </div>
