@@ -120,28 +120,55 @@ BEGIN
 END;
 $$;
 
--- ─── RPC transaccional: confirm_goods_receipt ─────────────────────────────────
--- Para producción: usar esta función en lugar del server action de TypeScript.
--- Garantiza atomicidad: si cualquier paso falla, hace ROLLBACK completo.
+-- ─── RPC transaccional: confirm_goods_receipt() ───────────────────────────────
 --
--- Parámetro p_items es un array JSONB con objetos:
--- {
---   purchase_order_item_id: uuid,
---   linked_product_id: uuid,
---   linked_variant_id: uuid,
---   product_name_snapshot: text,
---   variant_snapshot: text,       (nullable)
---   supplier_sku_snapshot: text,  (nullable)
---   quantity_received: integer,
---   unit_cost: numeric,
---   notes: text                   (nullable)
--- }
+-- ÚNICO punto del sistema donde se incrementa product_variants.stock.
+-- Garantía absoluta: todo o nada. Si cualquier validación o mutación falla,
+-- PostgreSQL hace ROLLBACK completo — no quedan registros parciales.
+--
+-- Estrategia en dos pasadas:
+--   PASADA 1 (validación):  valida TODOS los ítems y bloquea las filas con
+--                           FOR UPDATE antes de tocar nada.
+--   PASADA 2 (mutación):    ejecuta todos los INSERTs/UPDATEs; las filas ya
+--                           están bloqueadas, cualquier error dispara ROLLBACK.
+--
+-- Firma (sin p_supplier_id ni p_created_by — se resuelven internamente):
+--   p_purchase_order_id  uuid   — OC a recibir
+--   p_receipt_date       date   — fecha del ingreso (null = hoy)
+--   p_notes              text   — notas del ingreso (nullable)
+--   p_items              jsonb  — array de ítems a recibir (ver esquema abajo)
+--
+-- Esquema de cada objeto en p_items:
+--   {
+--     "purchase_order_item_id": "<uuid>",
+--     "linked_product_id":      "<uuid>",
+--     "linked_variant_id":      "<uuid>",
+--     "product_name_snapshot":  "<text>",
+--     "variant_snapshot":       "<text|null>",
+--     "supplier_sku_snapshot":  "<text|null>",
+--     "quantity_received":      <integer>,
+--     "unit_cost":              <numeric|null>,
+--     "notes":                  "<text|null>"
+--   }
+--
+-- Retorna:
+--   { "receipt_id": "<uuid>", "receipt_number": "<text>", "new_status": "<text>" }
+--
+-- Errores (RAISE EXCEPTION con prefijo de código legible):
+--   UNAUTHORIZED      — usuario no es admin activo
+--   NOT_FOUND         — OC no existe
+--   INVALID_STATUS    — OC no está en issued / partial_received
+--   NO_ITEMS          — array de ítems vacío
+--   ITEM_NOT_FOUND    — ítem no pertenece a la OC
+--   ITEM_NOT_LINKED   — ítem sin linked_product_id / linked_variant_id
+--   INVALID_QTY       — quantity_received <= 0
+--   EXCEEDS_PENDING   — quantity_received > cantidad pendiente
+--   VARIANT_NOT_FOUND — variante no existe en product_variants
+-- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION confirm_goods_receipt(
   p_purchase_order_id   uuid,
-  p_supplier_id         uuid,
   p_receipt_date        date,
   p_notes               text,
-  p_created_by          uuid,
   p_items               jsonb
 )
 RETURNS jsonb
@@ -149,88 +176,246 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 DECLARE
+  v_admin_id        uuid;
+  v_oc_status       text;
+  v_oc_supplier_id  uuid;
   v_receipt_id      uuid;
   v_receipt_number  text;
   v_item            jsonb;
+  v_poi_id          uuid;
+  v_poi_ordered     integer;
+  v_poi_received    integer;
+  v_poi_product_id  uuid;
+  v_poi_variant_id  uuid;
+  v_qty_in          integer;
+  v_pending         integer;
   v_stock_before    integer;
   v_stock_after     integer;
   v_total_ordered   integer;
   v_total_received  integer;
   v_new_status      text;
 BEGIN
-  -- 1. Número de ingreso
+
+  -- ══════════════════════════════════════════════════════════════════
+  -- PASADA 1: VALIDACIONES (todo antes de cualquier mutación)
+  -- ══════════════════════════════════════════════════════════════════
+
+  -- ── 0. Validar usuario admin activo ────────────────────────────────────────
+  SELECT id INTO v_admin_id
+  FROM app_users
+  WHERE auth_user_id = auth.uid()
+    AND role        = 'admin'
+    AND is_active   = true
+  LIMIT 1;
+
+  IF v_admin_id IS NULL THEN
+    RAISE EXCEPTION 'UNAUTHORIZED: Usuario no autorizado o inactivo.';
+  END IF;
+
+  -- ── 1. Bloquear y validar OC ────────────────────────────────────────────────
+  --      FOR UPDATE: evita que otra transacción modifique la OC mientras
+  --      procesamos el ingreso.
+  SELECT status, supplier_id
+  INTO   v_oc_status, v_oc_supplier_id
+  FROM   purchase_orders
+  WHERE  id = p_purchase_order_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'NOT_FOUND: Orden de Compra no encontrada.';
+  END IF;
+
+  IF v_oc_status NOT IN ('issued', 'partial_received') THEN
+    RAISE EXCEPTION
+      'INVALID_STATUS: La OC tiene estado "%" y no puede recibir mercadería. '
+      'Solo se permite estado "Emitida" o "Recepción parcial".',
+      v_oc_status;
+  END IF;
+
+  -- ── 2. Validar que llegan ítems ─────────────────────────────────────────────
+  IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'NO_ITEMS: El ingreso debe contener al menos un ítem con cantidad mayor a 0.';
+  END IF;
+
+  -- ── 3. Validar cada ítem y bloquear sus filas ───────────────────────────────
+  --      Todos los FOR UPDATE aquí garantizan que las filas no cambien durante
+  --      la pasada de mutaciones que sigue.
+  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+  LOOP
+    v_poi_id := (v_item->>'purchase_order_item_id')::uuid;
+    v_qty_in := (v_item->>'quantity_received')::integer;
+
+    -- 3a. Ítem existe y pertenece a esta OC
+    SELECT quantity_ordered,
+           quantity_received,
+           linked_product_id,
+           linked_variant_id
+    INTO   v_poi_ordered,
+           v_poi_received,
+           v_poi_product_id,
+           v_poi_variant_id
+    FROM   purchase_order_items
+    WHERE  id                = v_poi_id
+      AND  purchase_order_id = p_purchase_order_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION
+        'ITEM_NOT_FOUND: El ítem % no pertenece a esta Orden de Compra.',
+        v_poi_id;
+    END IF;
+
+    -- 3b. Ítem vinculado al Maestro de productos
+    IF v_poi_product_id IS NULL OR v_poi_variant_id IS NULL THEN
+      RAISE EXCEPTION
+        'ITEM_NOT_LINKED: El producto "%" no está vinculado al Maestro. '
+        'Vincúlalo desde la Orden de Compra antes de registrar el ingreso.',
+        COALESCE(v_item->>'product_name_snapshot', v_poi_id::text);
+    END IF;
+
+    -- 3c. Cantidad a recibir > 0
+    IF v_qty_in <= 0 THEN
+      RAISE EXCEPTION
+        'INVALID_QTY: La cantidad a recibir debe ser mayor a 0 (producto: %).',
+        COALESCE(v_item->>'product_name_snapshot', v_poi_id::text);
+    END IF;
+
+    -- 3d. Cantidad no excede el pendiente
+    v_pending := v_poi_ordered - v_poi_received;
+    IF v_qty_in > v_pending THEN
+      RAISE EXCEPTION
+        'EXCEEDS_PENDING: Se intenta recibir % unidades de "%" pero solo quedan % pendientes.',
+        v_qty_in,
+        COALESCE(v_item->>'product_name_snapshot', '?'),
+        v_pending;
+    END IF;
+
+    -- 3e. Variante existe en el Maestro (bloquear fila para el UPDATE de stock)
+    SELECT stock INTO v_stock_before
+    FROM   product_variants
+    WHERE  id = v_poi_variant_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION
+        'VARIANT_NOT_FOUND: La variante % no existe en el Maestro de productos.',
+        v_poi_variant_id;
+    END IF;
+
+  END LOOP;
+  -- ── Fin pasada 1: todas las validaciones pasaron, todas las filas bloqueadas ─
+
+  -- ══════════════════════════════════════════════════════════════════
+  -- PASADA 2: MUTACIONES (solo se llega aquí si todo es válido)
+  -- ══════════════════════════════════════════════════════════════════
+
+  -- ── 4. Generar número único de ingreso ──────────────────────────────────────
   v_receipt_number := generate_goods_receipt_number();
 
-  -- 2. Crear cabecera
+  -- ── 5. Crear cabecera del ingreso ───────────────────────────────────────────
   INSERT INTO goods_receipts (
-    receipt_number, purchase_order_id, supplier_id,
-    receipt_date, notes, created_by
+    receipt_number,
+    purchase_order_id,
+    supplier_id,
+    receipt_date,
+    notes,
+    created_by
   ) VALUES (
-    v_receipt_number, p_purchase_order_id, p_supplier_id,
-    p_receipt_date, p_notes, p_created_by
+    v_receipt_number,
+    p_purchase_order_id,
+    v_oc_supplier_id,
+    COALESCE(p_receipt_date, current_date),
+    NULLIF(TRIM(COALESCE(p_notes, '')), ''),
+    v_admin_id
   )
   RETURNING id INTO v_receipt_id;
 
-  -- 3. Procesar ítems
+  -- ── 6. Procesar cada ítem: detalle → stock → auditoría → OC ────────────────
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
   LOOP
-    -- Detalle
+    v_poi_id := (v_item->>'purchase_order_item_id')::uuid;
+    v_qty_in := (v_item->>'quantity_received')::integer;
+
+    -- 6a. Insertar detalle del ingreso
     INSERT INTO goods_receipt_items (
-      goods_receipt_id, purchase_order_item_id,
-      linked_product_id, linked_variant_id,
-      product_name_snapshot, variant_snapshot, supplier_sku_snapshot,
-      quantity_received, unit_cost, notes
+      goods_receipt_id,
+      purchase_order_item_id,
+      linked_product_id,
+      linked_variant_id,
+      product_name_snapshot,
+      variant_snapshot,
+      supplier_sku_snapshot,
+      quantity_received,
+      unit_cost,
+      notes
     ) VALUES (
       v_receipt_id,
-      (v_item->>'purchase_order_item_id')::uuid,
+      v_poi_id,
       (v_item->>'linked_product_id')::uuid,
       (v_item->>'linked_variant_id')::uuid,
       v_item->>'product_name_snapshot',
-      v_item->>'variant_snapshot',
-      v_item->>'supplier_sku_snapshot',
-      (v_item->>'quantity_received')::integer,
-      (v_item->>'unit_cost')::numeric,
-      v_item->>'notes'
+      NULLIF(TRIM(COALESCE(v_item->>'variant_snapshot',      '')), ''),
+      NULLIF(TRIM(COALESCE(v_item->>'supplier_sku_snapshot', '')), ''),
+      v_qty_in,
+      CASE WHEN (v_item->>'unit_cost') IS NOT NULL
+           THEN (v_item->>'unit_cost')::numeric END,
+      NULLIF(TRIM(COALESCE(v_item->>'notes', '')), '')
     );
 
-    -- Leer stock con bloqueo (evita race conditions)
+    -- 6b. Leer stock actual
+    --     La fila ya está bloqueada desde la pasada de validación;
+    --     este SELECT lee el valor vigente dentro de la transacción.
     SELECT stock INTO v_stock_before
-    FROM product_variants
-    WHERE id = (v_item->>'linked_variant_id')::uuid
-    FOR UPDATE;
+    FROM   product_variants
+    WHERE  id = (v_item->>'linked_variant_id')::uuid;
 
-    v_stock_after := v_stock_before + (v_item->>'quantity_received')::integer;
+    v_stock_after := v_stock_before + v_qty_in;
 
-    -- Actualizar stock
+    -- 6c. Sumar stock ← ÚNICO PUNTO del sistema donde stock sube
     UPDATE product_variants
-    SET stock = v_stock_after
-    WHERE id = (v_item->>'linked_variant_id')::uuid;
+    SET    stock = v_stock_after
+    WHERE  id    = (v_item->>'linked_variant_id')::uuid;
 
-    -- Auditoría
+    -- 6d. Registrar movimiento de auditoría (obligatorio)
+    --     Si este INSERT falla por cualquier razón, la excepción propaga
+    --     y PostgreSQL hace ROLLBACK de toda la transacción.
     INSERT INTO stock_movements (
-      product_id, variant_id,
-      movement_type, source_type, source_id,
-      quantity_delta, stock_before, stock_after, notes
+      product_id,
+      variant_id,
+      movement_type,
+      source_type,
+      source_id,
+      quantity_delta,
+      stock_before,
+      stock_after,
+      notes,
+      created_by
     ) VALUES (
       (v_item->>'linked_product_id')::uuid,
       (v_item->>'linked_variant_id')::uuid,
-      'in', 'goods_receipt', v_receipt_id,
-      (v_item->>'quantity_received')::integer,
-      v_stock_before, v_stock_after,
-      'Ingreso de mercadería ' || v_receipt_number
+      'in',
+      'goods_receipt',
+      v_receipt_id,
+      v_qty_in,
+      v_stock_before,
+      v_stock_after,
+      'Ingreso de mercadería ' || v_receipt_number,
+      v_admin_id
     );
 
-    -- Actualizar acumulado en OC
+    -- 6e. Actualizar quantity_received acumulado en el ítem de OC
     UPDATE purchase_order_items
-    SET quantity_received = quantity_received + (v_item->>'quantity_received')::integer
-    WHERE id = (v_item->>'purchase_order_item_id')::uuid;
+    SET    quantity_received = quantity_received + v_qty_in
+    WHERE  id = v_poi_id;
+
   END LOOP;
 
-  -- 4. Calcular nuevo estado de la OC
+  -- ── 7. Recalcular estado de la OC ───────────────────────────────────────────
+  --      Releer los ítems con los quantity_received ya actualizados.
   SELECT SUM(quantity_ordered), SUM(quantity_received)
-  INTO v_total_ordered, v_total_received
-  FROM purchase_order_items
-  WHERE purchase_order_id = p_purchase_order_id;
+  INTO   v_total_ordered, v_total_received
+  FROM   purchase_order_items
+  WHERE  purchase_order_id = p_purchase_order_id;
 
   v_new_status := CASE
     WHEN v_total_received >= v_total_ordered THEN 'received'
@@ -238,13 +423,16 @@ BEGIN
   END;
 
   UPDATE purchase_orders
-  SET status = v_new_status, updated_at = now()
-  WHERE id = p_purchase_order_id;
+  SET    status     = v_new_status,
+         updated_at = now()
+  WHERE  id = p_purchase_order_id;
 
+  -- ── 8. Retornar resultado ───────────────────────────────────────────────────
   RETURN jsonb_build_object(
     'receipt_id',     v_receipt_id,
     'receipt_number', v_receipt_number,
     'new_status',     v_new_status
   );
+
 END;
 $$;
