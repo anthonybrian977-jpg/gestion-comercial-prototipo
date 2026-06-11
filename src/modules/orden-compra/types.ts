@@ -118,3 +118,22 @@ export type PurchaseOrderActionResult = {
   orderId?: string;
   errors?: string[];
 };
+
+// ─── Comparativa de proveedores ───────────────────────────────────────────────
+
+/**
+ * Alternativa de otro proveedor para el mismo producto.
+ * priceDiff > 0 → la alternativa es MÁS BARATA que el ítem actual.
+ * priceDiff < 0 → la alternativa es MÁS CARA.
+ */
+export type SupplierAlternative = {
+  supplierId: string;
+  supplierName: string;
+  /** ID del supplier_catalog_item en el catálogo del proveedor alternativo */
+  catalogItemId: string;
+  price: number;
+  /** currentPrice − alt.price. Positivo = alternativa más barata. */
+  priceDiff: number;
+  /** Diferencia porcentual relativa al precio actual. */
+  priceDiffPct: number;
+};

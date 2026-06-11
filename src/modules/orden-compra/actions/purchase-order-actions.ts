@@ -7,6 +7,7 @@ import type {
   PurchaseOrderActionResult,
   PurchaseOrderItem,
   SaveDraftPayload,
+  SupplierAlternative,
 } from "@/modules/orden-compra/types";
 import type { SupplierCatalogItem } from "@/modules/proveedores/types";
 
@@ -58,6 +59,138 @@ export async function getCatalogForSupplier(
 
   if (error) return [];
   return (data ?? []) as SupplierCatalogItem[];
+}
+
+// ─── Helper: normalización para matching entre catálogos ─────────────────────
+
+/** Minúsculas + trim + espacios colapsados. No slugifica para no perder info. */
+function normalizeForMatch(s: string | null | undefined): string {
+  if (!s) return "";
+  return s.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+// ─── Server action: comparativa de proveedores ────────────────────────────────
+/**
+ * Para cada ítem del catálogo actual busca el mismo producto en catálogos de
+ * otros proveedores. Matching primario por linked_variant_id (exacto); si no,
+ * por nombre + marca + modelo + categoría + atributos normalizados.
+ *
+ * Retorna mapa catalogItemId → alternativas ordenadas de más barata a más cara.
+ * No modifica nada — solo lectura.
+ */
+export async function getAlternativesForCatalog(
+  currentSupplierId: string,
+  catalogItemIds: string[],
+): Promise<Record<string, SupplierAlternative[]>> {
+  if (catalogItemIds.length === 0) return {};
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  // Nuestros ítems con todos los campos de matching
+  const { data: ourItems, error: ourErr } = await supabase
+    .from("supplier_catalog_items")
+    .select(
+      "id, product_name, brand, model, category, presentation, color, size, linked_variant_id, purchase_price",
+    )
+    .in("id", catalogItemIds);
+
+  if (ourErr || !ourItems || ourItems.length === 0) return {};
+
+  // Ítems activos de OTROS proveedores (join con suppliers para nombre)
+  const { data: othersRaw, error: othersErr } = await supabase
+    .from("supplier_catalog_items")
+    .select(
+      "id, supplier_id, product_name, brand, model, category, presentation, color, size, linked_variant_id, purchase_price, suppliers(name)",
+    )
+    .eq("is_active", true)
+    .neq("supplier_id", currentSupplierId);
+
+  if (othersErr || !othersRaw || othersRaw.length === 0) return {};
+
+  type OurItem = {
+    id: string;
+    product_name: string;
+    brand: string | null;
+    model: string | null;
+    category: string | null;
+    presentation: string | null;
+    color: string | null;
+    size: string | null;
+    linked_variant_id: string | null;
+    purchase_price: number;
+  };
+  type OtherItem = OurItem & {
+    supplier_id: string;
+    // Supabase puede devolver la relación como objeto o array según el driver
+    suppliers: { name: string } | { name: string }[] | null;
+  };
+
+  // Doble cast necesario porque el tipo inferido de Supabase difiere del runtime
+  const others = othersRaw as unknown as OtherItem[];
+  const result: Record<string, SupplierAlternative[]> = {};
+
+  for (const our of ourItems as OurItem[]) {
+    const found: SupplierAlternative[] = [];
+
+    for (const other of others) {
+      let isMatch = false;
+
+      // Matching primario: mismo linked_variant_id (misma variante en Maestro)
+      if (
+        our.linked_variant_id &&
+        other.linked_variant_id &&
+        our.linked_variant_id === other.linked_variant_id
+      ) {
+        isMatch = true;
+      } else if (
+        normalizeForMatch(our.product_name) === normalizeForMatch(other.product_name)
+      ) {
+        // Matching secundario: nombre idéntico + atributos compatibles
+        const ok =
+          (!our.brand || !other.brand ||
+            normalizeForMatch(our.brand) === normalizeForMatch(other.brand)) &&
+          (!our.model || !other.model ||
+            normalizeForMatch(our.model) === normalizeForMatch(other.model)) &&
+          (!our.category || !other.category ||
+            normalizeForMatch(our.category) === normalizeForMatch(other.category)) &&
+          (!our.presentation || !other.presentation ||
+            normalizeForMatch(our.presentation) === normalizeForMatch(other.presentation)) &&
+          (!our.color || !other.color ||
+            normalizeForMatch(our.color) === normalizeForMatch(other.color)) &&
+          (!our.size || !other.size ||
+            normalizeForMatch(our.size) === normalizeForMatch(other.size));
+        if (ok) isMatch = true;
+      }
+
+      if (isMatch) {
+        const priceDiff = our.purchase_price - other.purchase_price;
+        // suppliers puede ser objeto o array según la versión del driver
+        const suppliersRaw = other.suppliers;
+        const supplierName = Array.isArray(suppliersRaw)
+          ? (suppliersRaw[0]?.name ?? "Proveedor desconocido")
+          : (suppliersRaw?.name ?? "Proveedor desconocido");
+        found.push({
+          supplierId: other.supplier_id,
+          supplierName,
+          catalogItemId: other.id,
+          price: other.purchase_price,
+          priceDiff,
+          priceDiffPct:
+            our.purchase_price > 0
+              ? (priceDiff / our.purchase_price) * 100
+              : 0,
+        });
+      }
+    }
+
+    if (found.length > 0) {
+      // Ordenar: alternativa más barata primero (mayor priceDiff al frente)
+      result[our.id] = found.sort((a, b) => b.priceDiff - a.priceDiff);
+    }
+  }
+
+  return result;
 }
 
 // ─── Server action: guardar borrador ─────────────────────────────────────────

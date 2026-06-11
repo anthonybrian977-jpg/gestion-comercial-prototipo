@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
-import type { CartItem } from "@/modules/orden-compra/types";
-import type { SupplierCatalogItem } from "@/modules/proveedores/types";
-import type { SupplierRecord } from "@/modules/proveedores/types";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import type { CartItem, SupplierAlternative } from "@/modules/orden-compra/types";
+import type { SupplierCatalogItem, SupplierRecord } from "@/modules/proveedores/types";
 import {
   getCatalogForSupplier,
+  getAlternativesForCatalog,
   saveDraftPurchaseOrder,
   issuePurchaseOrder,
 } from "@/modules/orden-compra/actions/purchase-order-actions";
@@ -14,13 +15,104 @@ import { formatCurrency } from "@/modules/productos/utils/format";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function catalogItemLabel(item: SupplierCatalogItem): string {
-  const attrs = [item.color, item.size, item.presentation].filter(Boolean).join(" · ");
-  return attrs ? `${item.product_name} (${attrs})` : item.product_name;
-}
-
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// ─── Sub-componente: comparativa de proveedores por ítem ──────────────────────
+/**
+ * Panel expandible que muestra este proveedor vs. alternativas encontradas.
+ * Los diffs se recalculan en vivo usando currentPrice (precio editado en carrito).
+ * No toma ninguna decisión — solo muestra información.
+ */
+function AlternativesPanel({
+  currentPrice,
+  alternatives,
+}: {
+  currentPrice: number;
+  alternatives: SupplierAlternative[];
+}) {
+  const [open, setOpen] = useState(false);
+
+  // Recalcular diferencias en vivo (el usuario puede haber editado el precio)
+  const altsLive = alternatives.map((alt) => {
+    const diff = currentPrice - alt.price;
+    const pct = currentPrice > 0 ? (diff / currentPrice) * 100 : 0;
+    return { ...alt, liveDiff: diff, livePct: pct };
+  });
+
+  const cheapest = altsLive.find((a) => a.liveDiff > 0);
+
+  return (
+    <div className="mt-2 rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2">
+      {/* Cabecera siempre visible */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between text-left"
+      >
+        <span className="text-[11px] font-medium text-amber-700">
+          {cheapest
+            ? `⚠ ${cheapest.supplierName} lo tiene a ${formatCurrency(cheapest.price)} — S/ ${cheapest.liveDiff.toFixed(2)} menos`
+            : `ℹ También disponible en ${alternatives.length} proveedor${alternatives.length !== 1 ? "es" : ""}`}
+        </span>
+        <span className="ml-2 shrink-0 text-[10px] text-amber-500">
+          {open ? "▲ cerrar" : "▼ ver"}
+        </span>
+      </button>
+
+      {/* Tabla expandida */}
+      {open && (
+        <div className="mt-2.5 space-y-1">
+          {/* Fila: este proveedor */}
+          <div className="flex items-center gap-2 rounded-md bg-cyan-50 px-2 py-1.5 text-[11px] ring-1 ring-cyan-100">
+            <span className="min-w-0 flex-1 font-semibold text-cyan-800">Este proveedor</span>
+            <span className="w-20 text-right font-semibold text-cyan-900">
+              {formatCurrency(currentPrice)}
+            </span>
+            <span className="w-24 text-right text-cyan-400">—</span>
+            <span className="w-16" />
+          </div>
+
+          {/* Alternativas */}
+          {altsLive.map((alt) => (
+            <div
+              key={alt.catalogItemId}
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[11px] hover:bg-white"
+            >
+              <span className="min-w-0 flex-1 truncate text-slate-700">{alt.supplierName}</span>
+              <span className="w-20 text-right font-semibold text-slate-800">
+                {formatCurrency(alt.price)}
+              </span>
+              <span
+                className={`w-24 text-right font-medium ${
+                  alt.liveDiff > 0 ? "text-emerald-600" : "text-rose-500"
+                }`}
+              >
+                {alt.liveDiff > 0
+                  ? `−S/ ${alt.liveDiff.toFixed(2)}`
+                  : `+S/ ${Math.abs(alt.liveDiff).toFixed(2)}`}{" "}
+                <span className="opacity-70">({Math.abs(alt.livePct).toFixed(1)}%)</span>
+              </span>
+              <Link
+                href={`/orden-compra/nueva?supplierId=${alt.supplierId}`}
+                target="_blank"
+                className="w-16 shrink-0 rounded px-1.5 py-0.5 text-center text-[10px] font-semibold text-cyan-600 ring-1 ring-cyan-200 hover:bg-cyan-50"
+                title={`Abrir nueva OC con ${alt.supplierName} en nueva pestaña`}
+              >
+                Crear OC
+              </Link>
+            </div>
+          ))}
+
+          <p className="mt-1.5 text-[10px] text-amber-500">
+            Esta OC pertenece a este proveedor. Para comprar de otra fuente, usa{" "}
+            <strong>Crear OC</strong> en una nueva pestaña.
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
@@ -48,6 +140,10 @@ export function NewPurchaseOrderView({
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
 
+  // ── Comparativa de proveedores ───────────────────────────────────────────
+  // Mapa: catalogItemId → alternativas de otros proveedores para ese producto
+  const [alternatives, setAlternatives] = useState<Record<string, SupplierAlternative[]>>({});
+
   // ── Carrito ──────────────────────────────────────────────────────────────
   const [cart, setCart] = useState<CartItem[]>([]);
 
@@ -56,14 +152,34 @@ export function NewPurchaseOrderView({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  // Cargar alternativas para catálogo inicial (URL con ?supplierId=...)
+  useEffect(() => {
+    if (initialSupplierId && initialCatalog.length > 0) {
+      getAlternativesForCatalog(
+        initialSupplierId,
+        initialCatalog.map((i) => i.id),
+      )
+        .then(setAlternatives)
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Catálogo filtrado ────────────────────────────────────────────────────
   const filteredCatalog = useMemo(() => {
     const q = catalogSearch.trim().toLowerCase();
     if (!q) return catalog;
     return catalog.filter((item) =>
-      [item.product_name, item.brand, item.model, item.category,
-       item.supplier_sku, item.color, item.size, item.presentation]
-        .some((f) => f?.toLowerCase().includes(q)),
+      [
+        item.product_name,
+        item.brand,
+        item.model,
+        item.category,
+        item.supplier_sku,
+        item.color,
+        item.size,
+        item.presentation,
+      ].some((f) => f?.toLowerCase().includes(q)),
     );
   }, [catalog, catalogSearch]);
 
@@ -73,21 +189,30 @@ export function NewPurchaseOrderView({
     [cart],
   );
 
-  // ── Cambiar proveedor → recargar catálogo ────────────────────────────────
+  // ── Cambiar proveedor → recargar catálogo y alternativas ─────────────────
   async function handleSupplierChange(id: string) {
     setSupplierId(id);
     setCart([]);
     setCatalogSearch("");
-    if (!id) { setCatalog([]); return; }
+    setAlternatives({});
+    if (!id) {
+      setCatalog([]);
+      return;
+    }
     setCatalogLoading(true);
     const items = await getCatalogForSupplier(id);
     setCatalog(items);
     setCatalogLoading(false);
+    // Cargar alternativas en background — no bloquea el render del catálogo
+    if (items.length > 0) {
+      getAlternativesForCatalog(id, items.map((i) => i.id))
+        .then(setAlternatives)
+        .catch(() => {});
+    }
   }
 
   // ── Agregar al carrito ───────────────────────────────────────────────────
   function handleAddToCart(item: SupplierCatalogItem) {
-    // Si ya está en el carrito, incrementar cantidad
     setCart((prev) => {
       const idx = prev.findIndex((c) => c.catalogItemId === item.id);
       if (idx >= 0) {
@@ -145,7 +270,8 @@ export function NewPurchaseOrderView({
     if (!supplierId) return "Debes seleccionar un proveedor.";
     if (cart.length === 0) return "Debes agregar al menos un producto al carrito.";
     for (const item of cart) {
-      if (item.quantity <= 0) return `La cantidad de "${item.productName}" debe ser mayor a 0.`;
+      if (item.quantity <= 0)
+        return `La cantidad de "${item.productName}" debe ser mayor a 0.`;
     }
     return "";
   }
@@ -153,7 +279,10 @@ export function NewPurchaseOrderView({
   // ── Guardar borrador ─────────────────────────────────────────────────────
   async function handleSaveDraft() {
     const validationError = validate();
-    if (validationError) { setError(validationError); return; }
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     setError("");
     setSaving(true);
     const result = await saveDraftPurchaseOrder({
@@ -169,7 +298,6 @@ export function NewPurchaseOrderView({
       return;
     }
     setSuccess(result.message);
-    // Redirigir al detalle de la OC guardada
     startTransition(() => {
       router.push(`/orden-compra/${result.orderId}`);
     });
@@ -178,8 +306,16 @@ export function NewPurchaseOrderView({
   // ── Emitir OC ────────────────────────────────────────────────────────────
   async function handleIssue() {
     const validationError = validate();
-    if (validationError) { setError(validationError); return; }
-    if (!window.confirm("¿Emitir la Orden de Compra? Esto creará o vinculará los productos en el Maestro con stock 0.")) return;
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    if (
+      !window.confirm(
+        "¿Emitir la Orden de Compra? Esto creará o vinculará los productos en el Maestro con stock 0.",
+      )
+    )
+      return;
     setError("");
     setSaving(true);
 
@@ -204,7 +340,7 @@ export function NewPurchaseOrderView({
 
     if (!issueResult.success) {
       setError(issueResult.message);
-      // El borrador ya se guardó, redirigir al detalle para que el usuario pueda reintentar
+      // Borrador ya guardado → ir al detalle para reintentar o corregir
       startTransition(() => {
         router.push(`/orden-compra/${draftResult.orderId}`);
       });
@@ -221,7 +357,7 @@ export function NewPurchaseOrderView({
 
   return (
     <div className="space-y-6">
-      {/* ── Mensajes de feedback ────────────────────────────────────────── */}
+      {/* ── Feedback ────────────────────────────────────────────────────── */}
       {error && (
         <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700 ring-1 ring-rose-100">
           {error}
@@ -233,11 +369,9 @@ export function NewPurchaseOrderView({
         </div>
       )}
 
-      {/* ── Header: proveedor + fechas + notas ──────────────────────────── */}
+      {/* ── Datos de la orden ────────────────────────────────────────────── */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-sm font-semibold text-slate-700">
-          Datos de la Orden
-        </h2>
+        <h2 className="mb-4 text-sm font-semibold text-slate-700">Datos de la Orden</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {/* Proveedor */}
           <div className="sm:col-span-2">
@@ -258,7 +392,7 @@ export function NewPurchaseOrderView({
             </select>
           </div>
 
-          {/* Fecha de OC */}
+          {/* Fecha de emisión */}
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
               Fecha de emisión
@@ -271,7 +405,7 @@ export function NewPurchaseOrderView({
             />
           </div>
 
-          {/* Fecha esperada */}
+          {/* Entrega esperada */}
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
               Entrega esperada
@@ -300,14 +434,12 @@ export function NewPurchaseOrderView({
         </div>
       </div>
 
-      {/* ── Cuerpo: catálogo + carrito ──────────────────────────────────── */}
+      {/* ── Catálogo + carrito ───────────────────────────────────────────── */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* ── Panel catálogo ─────────────────────────────────────────────── */}
+        {/* ── Panel catálogo ──────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700">
-              Catálogo del proveedor
-            </h2>
+            <h2 className="text-sm font-semibold text-slate-700">Catálogo del proveedor</h2>
             {catalog.length > 0 && (
               <span className="text-xs text-slate-400">
                 {filteredCatalog.length} / {catalog.length} ítems
@@ -320,13 +452,11 @@ export function NewPurchaseOrderView({
               Selecciona un proveedor para ver su catálogo.
             </p>
           )}
-
           {supplierId && catalogLoading && (
             <p className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
               Cargando catálogo…
             </p>
           )}
-
           {supplierId && !catalogLoading && catalog.length === 0 && (
             <p className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
               Este proveedor no tiene ítems activos en su catálogo.
@@ -351,13 +481,14 @@ export function NewPurchaseOrderView({
                 )}
                 {filteredCatalog.map((item) => {
                   const inCart = cart.some((c) => c.catalogItemId === item.id);
+                  const itemAlts = alternatives[item.id];
+                  const hasCheaperAlt = itemAlts?.some((a) => a.priceDiff > 0);
+
                   return (
                     <div
                       key={item.id}
                       className={`flex items-center justify-between rounded-xl px-3 py-2.5 transition ${
-                        inCart
-                          ? "bg-cyan-50 ring-1 ring-cyan-100"
-                          : "hover:bg-slate-50"
+                        inCart ? "bg-cyan-50 ring-1 ring-cyan-100" : "hover:bg-slate-50"
                       }`}
                     >
                       <div className="min-w-0 flex-1">
@@ -372,8 +503,14 @@ export function NewPurchaseOrderView({
                             <span className="ml-2 font-mono">{item.supplier_sku}</span>
                           )}
                         </p>
+                        {/* Badge: precio mejor en otro proveedor */}
+                        {hasCheaperAlt && (
+                          <p className="mt-0.5 text-[10px] font-medium text-amber-600">
+                            💰 Precio mejor en otro proveedor
+                          </p>
+                        )}
                       </div>
-                      <div className="ml-3 flex items-center gap-2 shrink-0">
+                      <div className="ml-3 flex shrink-0 items-center gap-2">
                         <span className="text-xs font-medium text-slate-700">
                           {formatCurrency(item.purchase_price)}
                         </span>
@@ -393,12 +530,10 @@ export function NewPurchaseOrderView({
           )}
         </div>
 
-        {/* ── Panel carrito ──────────────────────────────────────────────── */}
+        {/* ── Panel carrito ───────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700">
-              Carrito de la OC
-            </h2>
+            <h2 className="text-sm font-semibold text-slate-700">Carrito de la OC</h2>
             {cart.length > 0 && (
               <span className="text-xs text-slate-400">
                 {cart.length} ítem{cart.length !== 1 ? "s" : ""}
@@ -412,82 +547,93 @@ export function NewPurchaseOrderView({
             </p>
           ) : (
             <>
-              <div className="max-h-[360px] overflow-auto space-y-2">
-                {cart.map((item, idx) => (
-                  <div
-                    key={item.catalogItemId}
-                    className="rounded-xl border border-slate-100 bg-slate-50 p-3"
-                  >
-                    {/* Nombre + quitar */}
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-medium text-slate-800">
-                          {item.productName}
-                        </p>
-                        {[item.color, item.size, item.presentation]
-                          .filter(Boolean)
-                          .length > 0 && (
-                          <p className="text-[11px] text-slate-400">
-                            {[item.color, item.size, item.presentation]
-                              .filter(Boolean)
-                              .join(" · ")}
+              <div className="max-h-[480px] overflow-auto space-y-2">
+                {cart.map((item, idx) => {
+                  const itemAlts = alternatives[item.catalogItemId] ?? [];
+
+                  return (
+                    <div
+                      key={item.catalogItemId}
+                      className="rounded-xl border border-slate-100 bg-slate-50 p-3"
+                    >
+                      {/* Nombre + quitar */}
+                      <div className="mb-2 flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-slate-800">
+                            {item.productName}
                           </p>
-                        )}
+                          {[item.color, item.size, item.presentation].filter(Boolean).length >
+                            0 && (
+                            <p className="text-[11px] text-slate-400">
+                              {[item.color, item.size, item.presentation]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFromCart(idx)}
+                          className="shrink-0 text-slate-400 hover:text-rose-500"
+                          title="Quitar del carrito"
+                        >
+                          ✕
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveFromCart(idx)}
-                        className="shrink-0 text-slate-400 hover:text-rose-500"
-                        title="Quitar del carrito"
-                      >
-                        ✕
-                      </button>
-                    </div>
 
-                    {/* Cantidad + precio */}
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1">
-                        <label className="mb-0.5 block text-[11px] text-slate-400">
-                          Cantidad
-                        </label>
+                      {/* Cantidad + precio */}
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <label className="mb-0.5 block text-[11px] text-slate-400">
+                            Cantidad
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onChange={(e) => handleCartField(idx, "quantity", e.target.value)}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-100"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="mb-0.5 block text-[11px] text-slate-400">
+                            Precio unit. (S/)
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={item.unitCost}
+                            onChange={(e) => handleCartField(idx, "unitCost", e.target.value)}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-100"
+                          />
+                        </div>
+                        <div className="shrink-0 pt-4 text-xs font-semibold text-slate-700">
+                          = {formatCurrency(item.quantity * item.unitCost)}
+                        </div>
+                      </div>
+
+                      {/* Notas del ítem */}
+                      <div className="mt-2">
                         <input
-                          type="number"
-                          min={1}
-                          value={item.quantity}
-                          onChange={(e) => handleCartField(idx, "quantity", e.target.value)}
-                          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-100"
+                          type="text"
+                          value={item.notes}
+                          onChange={(e) => handleCartField(idx, "notes", e.target.value)}
+                          placeholder="Nota del ítem (opcional)"
+                          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500 outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-100"
                         />
                       </div>
-                      <div className="flex-1">
-                        <label className="mb-0.5 block text-[11px] text-slate-400">
-                          Precio unit. (S/)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          value={item.unitCost}
-                          onChange={(e) => handleCartField(idx, "unitCost", e.target.value)}
-                          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-100"
-                        />
-                      </div>
-                      <div className="shrink-0 pt-4 text-xs font-semibold text-slate-700">
-                        = {formatCurrency(item.quantity * item.unitCost)}
-                      </div>
-                    </div>
 
-                    {/* Notas */}
-                    <div className="mt-2">
-                      <input
-                        type="text"
-                        value={item.notes}
-                        onChange={(e) => handleCartField(idx, "notes", e.target.value)}
-                        placeholder="Nota del ítem (opcional)"
-                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500 outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-100"
-                      />
+                      {/* Comparativa de proveedores (si hay alternativas) */}
+                      {itemAlts.length > 0 && (
+                        <AlternativesPanel
+                          currentPrice={item.unitCost}
+                          alternatives={itemAlts}
+                        />
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Total */}
@@ -502,7 +648,7 @@ export function NewPurchaseOrderView({
         </div>
       </div>
 
-      {/* ── Footer: acciones ────────────────────────────────────────────── */}
+      {/* ── Footer: acciones ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-6 py-4 shadow-sm">
         <button
           type="button"
