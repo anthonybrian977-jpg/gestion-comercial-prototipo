@@ -331,6 +331,18 @@ export async function importCatalogItemToMaster(
     })
     .eq("id", itemId);
 
+  // 7. Vincular preferred_catalog_item_id en la variante recién creada
+  //    (silencioso: la columna puede no existir si el SQL de migración aún no se ejecutó)
+  await supabase
+    .from("product_variants")
+    .update({ preferred_catalog_item_id: itemId })
+    .eq("id", newVariant.id)
+    .then(({ error: prefErr }) => {
+      if (prefErr) {
+        console.warn("[importCatalogItemToMaster] preferred_catalog_item_id:", prefErr.message);
+      }
+    });
+
   revalidatePaths(supplierId);
   revalidatePath("/productos");
 

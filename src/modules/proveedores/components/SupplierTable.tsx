@@ -53,8 +53,9 @@ export function SupplierTable({ suppliers }: SupplierTableProps) {
                     "Contacto",
                     "Teléfono",
                     "Email",
-                    "Variantes",
-                    "Más barato en",
+                    "En catálogo",
+                    "Importados",
+                    "Pendientes",
                     "Estado",
                     "Acciones",
                   ].map((header) => (
@@ -93,13 +94,25 @@ export function SupplierTable({ suppliers }: SupplierTableProps) {
                       {supplier.email ?? "—"}
                     </td>
                     <td className="px-4 py-4 text-sm text-slate-900">
-                      {supplier.variant_count}
+                      {supplier.catalog_count > 0 ? (
+                        <span className="font-medium">{supplier.catalog_count}</span>
+                      ) : (
+                        <span className="text-slate-400">0</span>
+                      )}
                     </td>
-                    <td className="px-4 py-4 text-sm text-slate-900">
-                      {supplier.cheapest_count > 0 ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-medium text-cyan-800 ring-1 ring-cyan-100">
-                          {supplier.cheapest_count} variante
-                          {supplier.cheapest_count !== 1 ? "s" : ""}
+                    <td className="px-4 py-4">
+                      {supplier.imported_count > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-100">
+                          {supplier.imported_count}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">0</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4">
+                      {supplier.pending_count > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-100">
+                          {supplier.pending_count}
                         </span>
                       ) : (
                         <span className="text-slate-400">0</span>

@@ -12,10 +12,12 @@ export type SupplierRecord = {
 
 /** Proveedor enriquecido con estadísticas calculadas para el listado. */
 export type SupplierListItem = SupplierRecord & {
-  /** Número de variantes de producto que este proveedor suministra. */
-  variant_count: number;
-  /** Número de variantes en las que este proveedor tiene el precio más bajo. */
-  cheapest_count: number;
+  /** Total de productos en el catálogo del proveedor. */
+  catalog_count: number;
+  /** Productos del catálogo ya importados al Maestro. */
+  imported_count: number;
+  /** Productos del catálogo pendientes de importar. */
+  pending_count: number;
 };
 
 /** Variante de producto dentro del detalle de un proveedor. */

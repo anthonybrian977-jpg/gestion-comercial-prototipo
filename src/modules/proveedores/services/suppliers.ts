@@ -5,57 +5,48 @@ import type {
   SupplierRecord,
 } from "@/modules/proveedores/types";
 
-type SpRow = {
+type CatalogStatsRow = {
   supplier_id: string;
-  variant_id: string;
-  purchase_price: number;
+  imported_to_master: boolean;
 };
 
 export async function getSuppliersList(): Promise<SupplierListItem[]> {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
 
-  const [suppliersResult, spResult] = await Promise.all([
+  const [suppliersResult, catalogResult] = await Promise.all([
     supabase.from("suppliers").select("*").order("name"),
     supabase
-      .from("supplier_products")
-      .select("supplier_id, variant_id, purchase_price"),
+      .from("supplier_catalog_items")
+      .select("supplier_id, imported_to_master"),
   ]);
 
   if (suppliersResult.error) {
-    // La tabla puede no existir todavía (schema.sql pendiente de ejecutar).
     console.error("[proveedores] error al leer suppliers:", suppliersResult.error.message);
     return [];
   }
 
   const suppliers = (suppliersResult.data ?? []) as SupplierRecord[];
-  const spRows = (spResult.data ?? []) as SpRow[];
-
   if (suppliers.length === 0) return [];
 
-  // Calcular precio mínimo por variante (para determinar "más barato")
-  const variantMinPrice = new Map<string, number>();
-  for (const row of spRows) {
-    const current = variantMinPrice.get(row.variant_id);
-    if (current === undefined || row.purchase_price < current) {
-      variantMinPrice.set(row.variant_id, row.purchase_price);
-    }
-  }
+  // Acumular estadísticas por proveedor desde el catálogo
+  // (si la tabla aún no existe, catalogResult.data será null — stats en 0)
+  const catalogRows = (catalogResult.data ?? []) as CatalogStatsRow[];
 
-  // Acumular estadísticas por proveedor
-  const stats = new Map<string, { variant_count: number; cheapest_count: number }>();
-  for (const row of spRows) {
-    const s = stats.get(row.supplier_id) ?? { variant_count: 0, cheapest_count: 0 };
-    s.variant_count++;
-    const minPrice = variantMinPrice.get(row.variant_id) ?? Infinity;
-    if (row.purchase_price <= minPrice) {
-      s.cheapest_count++;
+  const stats = new Map<string, { catalog_count: number; imported_count: number; pending_count: number }>();
+  for (const row of catalogRows) {
+    const s = stats.get(row.supplier_id) ?? { catalog_count: 0, imported_count: 0, pending_count: 0 };
+    s.catalog_count++;
+    if (row.imported_to_master) {
+      s.imported_count++;
+    } else {
+      s.pending_count++;
     }
     stats.set(row.supplier_id, s);
   }
 
   return suppliers.map((s) => {
-    const st = stats.get(s.id) ?? { variant_count: 0, cheapest_count: 0 };
+    const st = stats.get(s.id) ?? { catalog_count: 0, imported_count: 0, pending_count: 0 };
     return { ...s, ...st };
   });
 }
