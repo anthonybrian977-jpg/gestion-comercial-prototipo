@@ -314,7 +314,7 @@ export async function issuePurchaseOrder(
 
     // 4. Actualizar supplier_catalog_items con vínculos al Maestro
     if (item.supplier_catalog_item_id) {
-      await supabase
+      const { error: catalogUpdateErr } = await supabase
         .from("supplier_catalog_items")
         .update({
           linked_product_id: productId,
@@ -324,16 +324,30 @@ export async function issuePurchaseOrder(
         })
         .eq("id", item.supplier_catalog_item_id);
 
+      if (catalogUpdateErr) {
+        errors.push(
+          `"${item.product_name_snapshot}": error al actualizar catálogo del proveedor — ${catalogUpdateErr.message}`,
+        );
+        continue; // No continuar con este ítem si el catálogo no se actualizó
+      }
+
       // 5. preferred_catalog_item_id: SOLO si está null (no reemplazar proveedor elegido)
-      await supabase
+      const { error: preferredErr } = await supabase
         .from("product_variants")
         .update({ preferred_catalog_item_id: item.supplier_catalog_item_id })
         .eq("id", variantId)
         .is("preferred_catalog_item_id", null);
+
+      if (preferredErr) {
+        errors.push(
+          `"${item.product_name_snapshot}": error al asignar catálogo preferido — ${preferredErr.message}`,
+        );
+        continue;
+      }
     }
 
     // 6. Actualizar purchase_order_items con los IDs del Maestro
-    await supabase
+    const { error: itemLinkErr } = await supabase
       .from("purchase_order_items")
       .update({
         linked_product_id: productId,
@@ -341,6 +355,12 @@ export async function issuePurchaseOrder(
         updated_at: new Date().toISOString(),
       })
       .eq("id", item.id);
+
+    if (itemLinkErr) {
+      errors.push(
+        `"${item.product_name_snapshot}": error al vincular el ítem con el Maestro — ${itemLinkErr.message}`,
+      );
+    }
   }
 
   // ── Si hubo errores en ítems, NO emitir — dejar en draft ─────────────────
