@@ -197,11 +197,25 @@ export async function createDispatchFromCustomerInvoice(
     .insert(dispatchItems);
 
   if (dispItemsErr) {
-    // Rollback manual: eliminar cabecera si los ítems fallaron
-    await supabase.from("dispatch_orders").delete().eq("id", dispatchId);
+    // Rollback manual: eliminar cabecera para no dejar un pedido huérfano.
+    // Requiere la política RLS "do_delete" en dispatch_orders — sin ella
+    // Postgres devuelve 0 filas en silencio y el rollback es no-op.
+    const { count: rolledBack } = await supabase
+      .from("dispatch_orders")
+      .delete({ count: "exact" })
+      .eq("id", dispatchId);
+
+    if ((rolledBack ?? 0) === 0) {
+      // El DELETE no eliminó la fila (política ausente o error interno).
+      // Loguear para monitoreo; el usuario recibirá el mensaje correcto.
+      console.error(
+        `[createDispatch] Rollback fallido: dispatch_orders ${dispatchId} puede haber quedado huérfano.`,
+      );
+    }
+
     return {
       success: false,
-      message: "Error al guardar los ítems del pedido: " + dispItemsErr.message,
+      message: "Error al guardar los ítems del pedido. El pedido no fue creado — intenta nuevamente.",
     };
   }
 

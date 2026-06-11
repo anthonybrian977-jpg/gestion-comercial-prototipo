@@ -330,3 +330,14 @@ CREATE POLICY "doi_insert" ON public.dispatch_order_items
       WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
     )
   );
+
+-- Permite eliminar la cabecera del pedido si el insert de ítems falla
+-- (rollback manual desde TypeScript). Solo admins activos.
+-- Sin esta política, RLS bloquea DELETE en silencio y el rollback es no-op.
+CREATE POLICY "do_delete" ON public.dispatch_orders
+  FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
+    )
+  );
