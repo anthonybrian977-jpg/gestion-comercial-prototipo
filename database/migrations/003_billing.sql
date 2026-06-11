@@ -171,31 +171,87 @@ ALTER TABLE public.supplier_invoice_items  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_invoices       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_invoice_items  ENABLE ROW LEVEL SECURITY;
 
--- Solo usuarios registrados en app_users pueden operar
--- (mismo patrón que las migraciones 001 y 002)
+-- Solo usuarios activos en app_users pueden leer.
+-- Solo admins activos pueden insertar / modificar.
+-- Columna correcta: auth_user_id (no user_id).
 
 CREATE POLICY "si_select" ON public.supplier_invoices
-  FOR SELECT USING (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND is_active = true
+    )
+  );
 CREATE POLICY "si_insert" ON public.supplier_invoices
-  FOR INSERT WITH CHECK (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
+    )
+  );
 CREATE POLICY "si_update" ON public.supplier_invoices
-  FOR UPDATE USING (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
+    )
+  );
 
 CREATE POLICY "sii_select" ON public.supplier_invoice_items
-  FOR SELECT USING (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND is_active = true
+    )
+  );
 CREATE POLICY "sii_insert" ON public.supplier_invoice_items
-  FOR INSERT WITH CHECK (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
+    )
+  );
 
 CREATE POLICY "ci_select" ON public.customer_invoices
-  FOR SELECT USING (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND is_active = true
+    )
+  );
 CREATE POLICY "ci_insert" ON public.customer_invoices
-  FOR INSERT WITH CHECK (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
+    )
+  );
 CREATE POLICY "ci_update" ON public.customer_invoices
-  FOR UPDATE USING (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
+    )
+  );
 
 CREATE POLICY "cii_select" ON public.customer_invoice_items
-  FOR SELECT USING (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND is_active = true
+    )
+  );
 CREATE POLICY "cii_insert" ON public.customer_invoice_items
-  FOR INSERT WITH CHECK (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
+    )
+  );
 CREATE POLICY "cii_update" ON public.customer_invoice_items
-  FOR UPDATE USING (auth.uid() IN (SELECT user_id FROM public.app_users));
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM public.app_users
+      WHERE auth_user_id = auth.uid() AND role = 'admin' AND is_active = true
+    )
+  );
