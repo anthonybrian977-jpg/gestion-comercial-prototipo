@@ -140,16 +140,16 @@ $$;
 --
 -- Esquema de cada objeto en p_items:
 --   {
---     "purchase_order_item_id": "<uuid>",
---     "linked_product_id":      "<uuid>",
---     "linked_variant_id":      "<uuid>",
---     "product_name_snapshot":  "<text>",
+--     "purchase_order_item_id": "<uuid>",    — identifica el ítem (requerido)
+--     "product_name_snapshot":  "<text>",    — snapshot para el historial
 --     "variant_snapshot":       "<text|null>",
 --     "supplier_sku_snapshot":  "<text|null>",
---     "quantity_received":      <integer>,
+--     "quantity_received":      <integer>,   — cantidad a recibir en este ingreso
 --     "unit_cost":              <numeric|null>,
 --     "notes":                  "<text|null>"
 --   }
+--   NOTA: linked_product_id y linked_variant_id NO se leen del cliente.
+--   El RPC los obtiene siempre desde purchase_order_items (fuente de verdad).
 --
 -- Retorna:
 --   { "receipt_id": "<uuid>", "receipt_number": "<text>", "new_status": "<text>" }
@@ -174,6 +174,7 @@ CREATE OR REPLACE FUNCTION confirm_goods_receipt(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_admin_id        uuid;
@@ -336,6 +337,14 @@ BEGIN
     v_poi_id := (v_item->>'purchase_order_item_id')::uuid;
     v_qty_in := (v_item->>'quantity_received')::integer;
 
+    -- Re-leer linked_product_id y linked_variant_id desde la BD.
+    -- Las filas están bloqueadas desde la pasada de validación;
+    -- el RPC nunca confía en los IDs que pudiera enviar el cliente.
+    SELECT linked_product_id, linked_variant_id
+    INTO   v_poi_product_id, v_poi_variant_id
+    FROM   purchase_order_items
+    WHERE  id = v_poi_id;
+
     -- 6a. Insertar detalle del ingreso
     INSERT INTO goods_receipt_items (
       goods_receipt_id,
@@ -351,8 +360,8 @@ BEGIN
     ) VALUES (
       v_receipt_id,
       v_poi_id,
-      (v_item->>'linked_product_id')::uuid,
-      (v_item->>'linked_variant_id')::uuid,
+      v_poi_product_id,
+      v_poi_variant_id,
       v_item->>'product_name_snapshot',
       NULLIF(TRIM(COALESCE(v_item->>'variant_snapshot',      '')), ''),
       NULLIF(TRIM(COALESCE(v_item->>'supplier_sku_snapshot', '')), ''),
@@ -367,14 +376,14 @@ BEGIN
     --     este SELECT lee el valor vigente dentro de la transacción.
     SELECT stock INTO v_stock_before
     FROM   product_variants
-    WHERE  id = (v_item->>'linked_variant_id')::uuid;
+    WHERE  id = v_poi_variant_id;
 
     v_stock_after := v_stock_before + v_qty_in;
 
     -- 6c. Sumar stock ← ÚNICO PUNTO del sistema donde stock sube
     UPDATE product_variants
     SET    stock = v_stock_after
-    WHERE  id    = (v_item->>'linked_variant_id')::uuid;
+    WHERE  id    = v_poi_variant_id;
 
     -- 6d. Registrar movimiento de auditoría (obligatorio)
     --     Si este INSERT falla por cualquier razón, la excepción propaga
@@ -391,8 +400,8 @@ BEGIN
       notes,
       created_by
     ) VALUES (
-      (v_item->>'linked_product_id')::uuid,
-      (v_item->>'linked_variant_id')::uuid,
+      v_poi_product_id,
+      v_poi_variant_id,
       'in',
       'goods_receipt',
       v_receipt_id,
