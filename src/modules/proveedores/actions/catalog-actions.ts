@@ -4,6 +4,35 @@ import { revalidatePath } from "next/cache";
 
 type ActionResult = { success: boolean; message: string };
 
+// ─── Inline payload types ─────────────────────────────────────────────────────
+// These mirror SmartProduct / SmartVariant from @/lib/excel/smart-product-import.
+// Defined here inline to avoid importing the client-only engine into a server action.
+
+type ImportVariantPayload = {
+  supplierSku?: string;
+  presentation?: string;
+  color?: string;
+  size?: string;
+  purchasePrice?: number;
+};
+
+type ImportProductPayload = {
+  productName: string;
+  brand?: string;
+  model?: string;
+  category?: string;
+  variants: ImportVariantPayload[];
+};
+
+// normKey — mirrors the one in smart-product-import (no xlsx dependency)
+function normKey(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
 function revalidatePaths(supplierId: string) {
   revalidatePath("/proveedores");
   revalidatePath(`/proveedores/${supplierId}`);
@@ -401,5 +430,313 @@ export async function deleteCatalogItemsBulk(
     success: true,
     message: `${count ?? itemIds.length} ítem(s) eliminado(s) del catálogo.`,
     deleted: count ?? itemIds.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Smart import (upsert or replace)
+// ---------------------------------------------------------------------------
+
+export type SmartCatalogImportMode = "update" | "replace";
+
+export type SmartCatalogImportResult = {
+  success: boolean;
+  message: string;
+  inserted: number;
+  updated: number;
+  deactivated: number;
+  errors: string[];
+};
+
+// ── Catalog row shape ────────────────────────────────────────────────────────
+
+type CatalogRow = {
+  supplier_id: string;
+  supplier_sku: string | null;
+  product_name: string;
+  brand: string | null;
+  model: string | null;
+  category: string | null;
+  presentation: string | null;
+  color: string | null;
+  size: string | null;
+  purchase_price: number;
+  is_active: boolean;
+};
+
+type ExistingCatalogItem = {
+  id: string;
+  supplier_sku: string | null;
+  product_name: string;
+  brand: string | null;
+  model: string | null;
+  category: string | null;
+  presentation: string | null;
+  color: string | null;
+  size: string | null;
+};
+
+/**
+ * Build a normalised signature string for a catalog item based on its full set
+ * of identifying attributes (used when no supplier_sku is available).
+ *
+ * "Flora Gucci EDP", brand="Gucci", presentation="50ml"
+ *   → "floragucci|gucci|||50ml||"
+ *
+ * This prevents items that share a product_name but differ in variant attributes
+ * (size, color, presentation) from being merged.
+ */
+function buildSupplierCatalogSignature(item: {
+  product_name: string;
+  brand: string | null;
+  model: string | null;
+  category: string | null;
+  presentation: string | null;
+  color: string | null;
+  size: string | null;
+}): string {
+  return [
+    item.product_name,
+    item.brand ?? "",
+    item.model ?? "",
+    item.category ?? "",
+    item.presentation ?? "",
+    item.color ?? "",
+    item.size ?? "",
+  ]
+    .map((v) => normKey(v))
+    .join("|");
+}
+
+/**
+ * Import SmartProduct[] (already parsed client-side) into supplier_catalog_items.
+ *
+ * ── SAFETY RULES ────────────────────────────────────────────────────────────
+ * ✓  Only touches supplier_catalog_items for this supplierId.
+ * ✓  Never deletes catalog items (preserves IDs for trazabilidad).
+ * ✓  Never touches product_variants, products, stock, or preferred_catalog_item_id.
+ * ✓  Never clears linked_product_id / linked_variant_id.
+ *
+ * ── MODES ───────────────────────────────────────────────────────────────────
+ * "update"  → upsert only the rows that appear in the Excel.
+ *             Items NOT in the Excel are left untouched (no deactivation).
+ *             Match: by supplier_sku first; if absent, by full-attribute signature.
+ *
+ * "replace" → upsert incoming rows + mark items NOT in the Excel as is_active=false.
+ *             No deletion. IDs are preserved. preferred_catalog_item_id is NOT cleared.
+ *             If is_active column does not exist, falls back to "update" mode silently.
+ */
+export async function importCatalogItemsSmart(
+  supplierId: string,
+  products: ImportProductPayload[],
+  importMode: SmartCatalogImportMode,
+): Promise<SmartCatalogImportResult> {
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const errors: string[] = [];
+
+  // ── Flatten incoming products → catalog row objects ───────────────────────
+  const rows: CatalogRow[] = products.flatMap((p) =>
+    p.variants.map((v) => ({
+      supplier_id: supplierId,
+      supplier_sku: v.supplierSku?.trim() || null,
+      product_name: p.productName.trim(),
+      brand: p.brand?.trim() || null,
+      model: p.model?.trim() || null,
+      category: p.category?.trim() || null,
+      presentation: v.presentation?.trim() || null,
+      color: v.color?.trim() || null,
+      size: v.size?.trim() || null,
+      purchase_price: v.purchasePrice ?? 0,
+      is_active: true,
+    })),
+  );
+
+  if (rows.length === 0) {
+    return {
+      success: false,
+      message: "No hay filas válidas para importar.",
+      inserted: 0,
+      updated: 0,
+      deactivated: 0,
+      errors,
+    };
+  }
+
+  // ── REPLACE mode: verificar que is_active existe ANTES de mutar nada ─────
+  // Si la columna no existe no podemos desactivar ítems obsoletos sin borrarlos,
+  // por lo que se cancela la operación completamente.
+  // "Actualizar catálogo" no requiere este chequeo y siempre puede continuar.
+  if (importMode === "replace") {
+    const { error: colCheckErr } = await supabase
+      .from("supplier_catalog_items")
+      .select("is_active")
+      .limit(0);
+
+    if (colCheckErr) {
+      const isColMissing =
+        colCheckErr.message.toLowerCase().includes("does not exist") ||
+        colCheckErr.message.toLowerCase().includes("no existe") ||
+        colCheckErr.code === "42703"; // PostgreSQL: undefined_column
+
+      const msg = isColMissing
+        ? "No se puede usar «Reemplazar catálogo»: la columna is_active no existe " +
+          "en supplier_catalog_items. Sin esa columna no es posible desactivar ítems " +
+          "obsoletos sin borrarlos, lo que rompería la trazabilidad. " +
+          "Usa «Actualizar catálogo» en su lugar, o añade la columna is_active a la tabla."
+        : "Error al verificar estructura de la tabla antes de reemplazar: " +
+          colCheckErr.message;
+
+      return {
+        success: false,
+        message: msg,
+        inserted: 0,
+        updated: 0,
+        deactivated: 0,
+        errors: [msg],
+      };
+    }
+  }
+
+  // ── Fetch existing catalog items for this supplier ────────────────────────
+  const { data: existingItems } = await supabase
+    .from("supplier_catalog_items")
+    .select("id, supplier_sku, product_name, brand, model, category, presentation, color, size")
+    .eq("supplier_id", supplierId);
+
+  // Build lookup maps
+  // 1) By supplier_sku: normKey(sku) → id  (highest precision)
+  const bySkuMap = new Map<string, string>();
+  // 2) By full attribute signature: signature → id  (for items without SKU)
+  const bySignatureMap = new Map<string, string>();
+
+  if (existingItems) {
+    for (const item of existingItems as ExistingCatalogItem[]) {
+      if (item.supplier_sku) {
+        bySkuMap.set(normKey(item.supplier_sku), item.id);
+      }
+      bySignatureMap.set(buildSupplierCatalogSignature(item), item.id);
+    }
+  }
+
+  // ── Classify incoming rows into UPDATE vs INSERT ──────────────────────────
+  const toInsert: CatalogRow[] = [];
+  const toUpdate: Array<{
+    id: string;
+    row: Omit<CatalogRow, "supplier_id"> & { updated_at: string };
+  }> = [];
+  const incomingIds = new Set<string>(); // IDs of existing items that will be touched
+
+  for (const row of rows) {
+    let existingId: string | undefined;
+
+    // 1. Match by SKU (most precise — a supplier SKU uniquely identifies an item)
+    if (row.supplier_sku) {
+      existingId = bySkuMap.get(normKey(row.supplier_sku));
+    }
+
+    // 2. Fall back to full-attribute signature
+    //    This correctly distinguishes "Flora Gucci 50ml" from "Flora Gucci 100ml"
+    //    even though they share the same product_name base.
+    if (!existingId) {
+      existingId = bySignatureMap.get(buildSupplierCatalogSignature(row));
+    }
+
+    if (existingId) {
+      incomingIds.add(existingId);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { supplier_id: _sid, ...rest } = row;
+      toUpdate.push({
+        id: existingId,
+        row: { ...rest, updated_at: new Date().toISOString() },
+      });
+    } else {
+      toInsert.push(row);
+    }
+  }
+
+  // ── Execute updates ───────────────────────────────────────────────────────
+  let updateErrors = 0;
+  for (const { id, row } of toUpdate) {
+    const { error } = await supabase
+      .from("supplier_catalog_items")
+      .update(row)
+      .eq("id", id);
+    if (error) {
+      updateErrors++;
+      errors.push(`Error actualizando "${row.product_name}": ${error.message}`);
+    }
+  }
+
+  // ── Execute inserts ───────────────────────────────────────────────────────
+  let insertedCount = 0;
+  if (toInsert.length > 0) {
+    const { error, count } = await supabase
+      .from("supplier_catalog_items")
+      .insert(toInsert);
+    if (error) {
+      errors.push("Error al insertar nuevos ítems: " + error.message);
+    } else {
+      insertedCount = count ?? toInsert.length;
+      // Add newly inserted items to incomingIds (they're already active)
+    }
+  }
+
+  // ── REPLACE mode: mark NOT-incoming items as is_active = false ────────────
+  // We only reach here if the is_active column check above passed.
+  // NEVER deletes rows. NEVER touches product_variants, products, or stock.
+  // NEVER clears preferred_catalog_item_id or linked_product_id/linked_variant_id.
+  let deactivatedCount = 0;
+  if (importMode === "replace" && existingItems) {
+    const notIncomingIds = (existingItems as ExistingCatalogItem[])
+      .map((i) => i.id)
+      .filter((id) => !incomingIds.has(id));
+
+    if (notIncomingIds.length > 0) {
+      const { error: deactErr, count: deactCount } = await supabase
+        .from("supplier_catalog_items")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .in("id", notIncomingIds);
+
+      if (deactErr) {
+        // Column check passed but update still failed — unexpected error, surface it
+        errors.push(`Error al desactivar ítems obsoletos: ${deactErr.message}`);
+      } else {
+        deactivatedCount = deactCount ?? notIncomingIds.length;
+      }
+    }
+  }
+
+  // ── Result ────────────────────────────────────────────────────────────────
+  const updatedCount = toUpdate.length - updateErrors;
+  const total = insertedCount + updatedCount;
+
+  if (total === 0 && errors.length > 0) {
+    return {
+      success: false,
+      message: "No se pudo importar ningún ítem.",
+      inserted: 0,
+      updated: 0,
+      deactivated: 0,
+      errors,
+    };
+  }
+
+  revalidatePaths(supplierId);
+
+  const deactMsg =
+    importMode === "replace" && deactivatedCount > 0
+      ? ` · ${deactivatedCount} desactivado(s) (no estaban en el Excel)`
+      : "";
+
+  return {
+    success: true,
+    message:
+      `${total} producto(s) procesado(s) · ${updatedCount} actualizado(s), ${insertedCount} nuevo(s)${deactMsg}.` +
+      (errors.length > 0 ? ` (${errors.length} advertencia(s))` : ""),
+    inserted: insertedCount,
+    updated: updatedCount,
+    deactivated: deactivatedCount,
+    errors,
   };
 }
