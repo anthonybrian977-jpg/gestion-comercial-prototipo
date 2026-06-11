@@ -141,15 +141,14 @@ $$;
 -- Esquema de cada objeto en p_items:
 --   {
 --     "purchase_order_item_id": "<uuid>",    — identifica el ítem (requerido)
---     "product_name_snapshot":  "<text>",    — snapshot para el historial
---     "variant_snapshot":       "<text|null>",
---     "supplier_sku_snapshot":  "<text|null>",
 --     "quantity_received":      <integer>,   — cantidad a recibir en este ingreso
---     "unit_cost":              <numeric|null>,
---     "notes":                  "<text|null>"
+--     "notes":                  "<text|null>" — nota opcional del receptor
 --   }
---   NOTA: linked_product_id y linked_variant_id NO se leen del cliente.
---   El RPC los obtiene siempre desde purchase_order_items (fuente de verdad).
+--   El RPC lee desde purchase_order_items todos los demás datos:
+--   linked_product_id, linked_variant_id, product_name_snapshot,
+--   presentation_snapshot, color_snapshot, size_snapshot,
+--   supplier_sku_snapshot, unit_cost.
+--   El cliente no envía ni snapshots ni IDs de Maestro.
 --
 -- Retorna:
 --   { "receipt_id": "<uuid>", "receipt_number": "<text>", "new_status": "<text>" }
@@ -186,15 +185,22 @@ DECLARE
   v_poi_id          uuid;
   v_poi_ordered     integer;
   v_poi_received    integer;
-  v_poi_product_id  uuid;
-  v_poi_variant_id  uuid;
-  v_qty_in          integer;
-  v_pending         integer;
-  v_stock_before    integer;
-  v_stock_after     integer;
-  v_total_ordered   integer;
-  v_total_received  integer;
-  v_new_status      text;
+  v_poi_product_id   uuid;
+  v_poi_variant_id   uuid;
+  v_poi_name         text;
+  v_poi_presentation text;
+  v_poi_color        text;
+  v_poi_size         text;
+  v_poi_sku          text;
+  v_poi_unit_cost    numeric;
+  v_variant_snapshot text;
+  v_qty_in           integer;
+  v_pending          integer;
+  v_stock_before     integer;
+  v_stock_after      integer;
+  v_total_ordered    integer;
+  v_total_received   integer;
+  v_new_status       text;
 BEGIN
 
   -- ══════════════════════════════════════════════════════════════════
@@ -337,15 +343,41 @@ BEGIN
     v_poi_id := (v_item->>'purchase_order_item_id')::uuid;
     v_qty_in := (v_item->>'quantity_received')::integer;
 
-    -- Re-leer linked_product_id y linked_variant_id desde la BD.
-    -- Las filas están bloqueadas desde la pasada de validación;
-    -- el RPC nunca confía en los IDs que pudiera enviar el cliente.
-    SELECT linked_product_id, linked_variant_id
-    INTO   v_poi_product_id, v_poi_variant_id
+    -- Leer desde purchase_order_items todos los datos del ítem.
+    -- Las filas están bloqueadas desde la pasada de validación.
+    -- purchase_order_items es la fuente de verdad; el cliente no
+    -- envía ninguno de estos campos.
+    SELECT linked_product_id,
+           linked_variant_id,
+           product_name_snapshot,
+           presentation_snapshot,
+           color_snapshot,
+           size_snapshot,
+           supplier_sku_snapshot,
+           unit_cost
+    INTO   v_poi_product_id,
+           v_poi_variant_id,
+           v_poi_name,
+           v_poi_presentation,
+           v_poi_color,
+           v_poi_size,
+           v_poi_sku,
+           v_poi_unit_cost
     FROM   purchase_order_items
     WHERE  id = v_poi_id;
 
-    -- 6a. Insertar detalle del ingreso
+    -- Construir variant_snapshot combinando color · talla · presentación.
+    -- CONCAT_WS ignora NULLs; NULLIF convierte cadena vacía en NULL.
+    v_variant_snapshot := NULLIF(
+      CONCAT_WS(' · ',
+        NULLIF(TRIM(COALESCE(v_poi_color,        '')), ''),
+        NULLIF(TRIM(COALESCE(v_poi_size,         '')), ''),
+        NULLIF(TRIM(COALESCE(v_poi_presentation, '')), '')
+      ),
+      ''
+    );
+
+    -- 6a. Insertar detalle del ingreso con datos 100% de la BD
     INSERT INTO goods_receipt_items (
       goods_receipt_id,
       purchase_order_item_id,
@@ -362,12 +394,11 @@ BEGIN
       v_poi_id,
       v_poi_product_id,
       v_poi_variant_id,
-      v_item->>'product_name_snapshot',
-      NULLIF(TRIM(COALESCE(v_item->>'variant_snapshot',      '')), ''),
-      NULLIF(TRIM(COALESCE(v_item->>'supplier_sku_snapshot', '')), ''),
+      v_poi_name,
+      v_variant_snapshot,
+      NULLIF(TRIM(COALESCE(v_poi_sku, '')), ''),
       v_qty_in,
-      CASE WHEN (v_item->>'unit_cost') IS NOT NULL
-           THEN (v_item->>'unit_cost')::numeric END,
+      v_poi_unit_cost,
       NULLIF(TRIM(COALESCE(v_item->>'notes', '')), '')
     );
 

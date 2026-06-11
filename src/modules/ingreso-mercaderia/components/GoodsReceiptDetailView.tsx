@@ -164,6 +164,8 @@ export function GoodsReceiptDetailView({
 
   // ── Confirmar ingreso ────────────────────────────────────────────────────
   async function handleConfirm() {
+    // El RPC lee todos los datos del ítem desde purchase_order_items.
+    // El cliente solo envía qué ítem, cuánto llegó y una nota opcional.
     const itemsToSend = order.items
       .filter((item) => {
         const q = parseInt(quantities[item.id] ?? "0", 10);
@@ -171,13 +173,7 @@ export function GoodsReceiptDetailView({
       })
       .map((item) => ({
         purchaseOrderItemId: item.id,
-        linkedProductId: item.linked_product_id ?? "",
-        linkedVariantId: item.linked_variant_id ?? "",
-        productNameSnapshot: item.product_name_snapshot,
-        variantSnapshot: buildVariantSnapshot(item),
-        supplierSkuSnapshot: item.supplier_sku_snapshot,
         quantityReceived: parseInt(quantities[item.id] ?? "0", 10),
-        unitCost: item.unit_cost,
         notes: itemNotes[item.id] ?? "",
       }));
 

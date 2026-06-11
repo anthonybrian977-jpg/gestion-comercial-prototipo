@@ -55,15 +55,12 @@ export async function confirmGoodsReceipt(
     p_purchase_order_id: payload.purchaseOrderId,
     p_receipt_date: payload.receiptDate || null,
     p_notes: payload.notes || null,
-    // linked_product_id y linked_variant_id se omiten a propósito:
-    // el RPC los lee siempre desde purchase_order_items (fuente de verdad).
+    // El RPC lee desde purchase_order_items todos los datos del ítem
+    // (IDs de Maestro, snapshots, unit_cost). El cliente envía solo
+    // qué ítem se recibe, cuánto llegó y una nota opcional.
     p_items: itemsToReceive.map((i) => ({
       purchase_order_item_id: i.purchaseOrderItemId,
-      product_name_snapshot:  i.productNameSnapshot,
-      variant_snapshot:       i.variantSnapshot    || null,
-      supplier_sku_snapshot:  i.supplierSkuSnapshot || null,
       quantity_received:      i.quantityReceived,
-      unit_cost:              i.unitCost,
       notes:                  i.notes || null,
     })),
   });

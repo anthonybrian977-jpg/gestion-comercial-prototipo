@@ -57,17 +57,14 @@ export type ConfirmReceiptPayload = {
 };
 
 export type ConfirmReceiptItemPayload = {
+  /** ID del ítem de OC que se está recibiendo */
   purchaseOrderItemId: string;
-  linkedProductId: string;
-  linkedVariantId: string;
-  productNameSnapshot: string;
-  /** "color · talla · presentación" combinado (puede ser vacío) */
-  variantSnapshot: string;
-  supplierSkuSnapshot: string | null;
   /** Cantidad que se recibe EN ESTE INGRESO (no el acumulado) */
   quantityReceived: number;
-  unitCost: number;
+  /** Nota opcional del receptor para este ítem */
   notes: string;
+  // El RPC lee desde purchase_order_items todos los demás datos
+  // (linked_*_id, snapshots, unit_cost). El cliente no los envía.
 };
 
 // ─── Resultado de server action ───────────────────────────────────────────────
