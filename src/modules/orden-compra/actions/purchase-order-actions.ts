@@ -667,8 +667,8 @@ async function createOrFindProductVariant(
       size: item.size_snapshot?.trim() || null,
       presentation: item.presentation_snapshot?.trim() || null,
       purchase_price: item.unit_cost,
-      sale_price: null,
-      stock: 0,       // ← SIEMPRE 0 — el stock lo suma Ingreso de Mercadería
+      sale_price: 0,   // ← 0 = "pendiente de definir" — la OC no conoce el precio de venta
+      stock: 0,        // ← SIEMPRE 0 — el stock lo suma Ingreso de Mercadería
       min_stock: 0,
       status: "active",
     };

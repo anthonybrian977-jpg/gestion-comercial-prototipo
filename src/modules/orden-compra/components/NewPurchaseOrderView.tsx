@@ -270,9 +270,10 @@ export function NewPurchaseOrderView({
   }
 
   // ── Actualizar campo del carrito ─────────────────────────────────────────
+  // unitCost no es editable en esta fase — lo fija el catálogo del proveedor.
   function handleCartField(
     idx: number,
-    field: "quantity" | "unitCost" | "notes",
+    field: "quantity" | "notes",
     value: string,
   ) {
     setCart((prev) => {
@@ -280,9 +281,6 @@ export function NewPurchaseOrderView({
       if (field === "quantity") {
         const q = Math.max(1, parseInt(value, 10) || 1);
         next[idx] = { ...next[idx], quantity: q };
-      } else if (field === "unitCost") {
-        const c = Math.max(0, parseFloat(value) || 0);
-        next[idx] = { ...next[idx], unitCost: c };
       } else {
         next[idx] = { ...next[idx], notes: value };
       }
@@ -634,14 +632,10 @@ export function NewPurchaseOrderView({
                           <label className="mb-0.5 block text-[11px] text-slate-400">
                             Precio unit. (S/)
                           </label>
-                          <input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            value={item.unitCost}
-                            onChange={(e) => handleCartField(idx, "unitCost", e.target.value)}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-100"
-                          />
+                          {/* Solo lectura — el precio lo fija el catálogo del proveedor */}
+                          <div className="w-full rounded-lg border border-slate-100 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 select-none">
+                            {formatCurrency(item.unitCost)}
+                          </div>
                         </div>
                         <div className="shrink-0 pt-4 text-xs font-semibold text-slate-700">
                           = {formatCurrency(item.quantity * item.unitCost)}
