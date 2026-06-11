@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReceivableOrder } from "@/modules/ingreso-mercaderia/types";
+import { formatDateLima } from "@/lib/date-format";
 import { STATUS_LABELS, STATUS_COLORS } from "@/modules/orden-compra/types";
 import type { PurchaseOrderStatus } from "@/modules/orden-compra/types";
 
@@ -89,7 +90,7 @@ export function GoodsReceiptList({ orders }: { orders: ReceivableOrder[] }) {
 
                 {/* Fecha */}
                 <td className="px-4 py-3 text-xs text-slate-500">
-                  {order.order_date}
+                  {formatDateLima(order.order_date)}
                 </td>
 
                 {/* Estado */}

@@ -1,19 +1,7 @@
 import Link from "next/link";
 import type { GoodsReceiptDetailHeader } from "@/modules/ingreso-mercaderia/types";
 import { formatCurrency } from "@/modules/productos/utils/format";
-
-// ─── Helpers de formato ───────────────────────────────────────────────────────
-
-function fmtDate(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  return `${d}/${m}/${y}`;
-}
-
-function fmtDateTime(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  const time = iso.slice(11, 16);
-  return `${d}/${m}/${y} ${time} UTC`;
-}
+import { formatDateLima, formatDateTimeLima } from "@/lib/date-format";
 
 // ─── Badge de estado ──────────────────────────────────────────────────────────
 
@@ -81,13 +69,13 @@ export function GoodsReceiptHistoryDetailView({
             <div>
               <p className="font-medium text-slate-600">Fecha de recepción</p>
               <p className="mt-0.5 text-sm font-semibold text-slate-800">
-                {fmtDate(receipt.receipt_date)}
+                {formatDateLima(receipt.receipt_date)}
               </p>
             </div>
             <div>
               <p className="font-medium text-slate-600">Registrado el</p>
               <p className="mt-0.5 text-sm font-semibold text-slate-800">
-                {fmtDateTime(receipt.created_at)}
+                {formatDateTimeLima(receipt.created_at)}
               </p>
             </div>
           </div>

@@ -8,6 +8,7 @@ import { confirmGoodsReceipt } from "@/modules/ingreso-mercaderia/actions/goods-
 import { STATUS_LABELS, STATUS_COLORS } from "@/modules/orden-compra/types";
 import type { PurchaseOrderStatus } from "@/modules/orden-compra/types";
 import { formatCurrency } from "@/modules/productos/utils/format";
+import { formatDateLima } from "@/lib/date-format";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -322,12 +323,12 @@ export function GoodsReceiptDetailView({
         <div className="mt-4 flex flex-wrap gap-6 text-xs text-slate-500">
           <span>
             <span className="font-medium text-slate-600">Fecha OC:</span>{" "}
-            {order.order_date}
+            {formatDateLima(order.order_date)}
           </span>
           {order.expected_date && (
             <span>
               <span className="font-medium text-slate-600">Entrega esperada:</span>{" "}
-              {order.expected_date}
+              {formatDateLima(order.expected_date)}
             </span>
           )}
           {order.notes && (

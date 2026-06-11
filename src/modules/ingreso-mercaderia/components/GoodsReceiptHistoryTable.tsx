@@ -1,18 +1,6 @@
 import Link from "next/link";
 import type { GoodsReceiptHistorySummary } from "@/modules/ingreso-mercaderia/types";
-
-// ─── Helpers de formato ───────────────────────────────────────────────────────
-
-function fmtDate(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  return `${d}/${m}/${y}`;
-}
-
-function fmtDateTime(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  const time = iso.slice(11, 16);
-  return `${d}/${m}/${y} ${time}`;
-}
+import { formatDateLima, formatDateTimeLima } from "@/lib/date-format";
 
 // ─── Barra de progreso ────────────────────────────────────────────────────────
 
@@ -124,8 +112,8 @@ export function GoodsReceiptHistoryTable({
 
               {/* Fecha/hora de registro */}
               <td className="px-4 py-3 text-xs text-slate-500">
-                <p>{fmtDate(r.receipt_date)}</p>
-                <p className="text-[11px] text-slate-400">{fmtDateTime(r.created_at)}</p>
+                <p>{formatDateLima(r.receipt_date)}</p>
+                <p className="text-[11px] text-slate-400">{formatDateTimeLima(r.created_at)}</p>
               </td>
 
               {/* Unidades recibidas en este ingreso */}
