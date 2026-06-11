@@ -138,7 +138,10 @@ export function ProductTable({ products }: ProductTableProps) {
     if (selectedIds.size === 0) return;
     const n = selectedIds.size;
     const confirmed = window.confirm(
-      `¿Eliminar definitivamente ${n} producto${n !== 1 ? "s" : ""}?\n\nEsta acción no se puede deshacer. Los vínculos con catálogos de proveedores también se limpiarán.`,
+      `¿Procesar ${n} producto${n !== 1 ? "s" : ""}?\n\n` +
+      `• Sin historial → se eliminan definitivamente.\n` +
+      `• Con historial (compras, ingresos, facturas o despachos) → se archivan para preservar los registros.\n\n` +
+      `Esta acción no se puede deshacer.`,
     );
     if (!confirmed) return;
 
@@ -153,6 +156,16 @@ export function ProductTable({ products }: ProductTableProps) {
 
     clearSelection();
     router.refresh();
+
+    // Informar si algún producto fue archivado en lugar de eliminado
+    if (result.archived > 0) {
+      const arch = result.archived;
+      const del  = result.deleted;
+      const msg = del === 0
+        ? `${arch} producto${arch !== 1 ? "s" : ""} archivado${arch !== 1 ? "s" : ""} en lugar de eliminado${arch !== 1 ? "s" : ""} porque ${arch !== 1 ? "tenían" : "tenía"} historial operativo.`
+        : `${del} eliminado${del !== 1 ? "s" : ""} · ${arch} archivado${arch !== 1 ? "s" : ""} por tener historial operativo.`;
+      alert(msg);
+    }
   }
 
   // Limpiar selección al cambiar de pestaña
@@ -228,7 +241,7 @@ export function ProductTable({ products }: ProductTableProps) {
               disabled={cleaning}
               className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
             >
-              {cleaning ? "Eliminando..." : `🗑 Eliminar ${selectedIds.size}`}
+              {cleaning ? "Procesando..." : `🗑 Eliminar ${selectedIds.size}`}
             </button>
           </div>
         </div>
