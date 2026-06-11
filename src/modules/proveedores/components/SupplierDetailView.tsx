@@ -248,6 +248,12 @@ export function SupplierDetailView({ supplier }: { supplier: SupplierDetail }) {
           >
             Importar Excel
           </button>
+          <Link
+            href={`/orden-compra/nueva?supplierId=${supplier.id}`}
+            className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100"
+          >
+            + Nueva OC
+          </Link>
         </div>
       )}
 
