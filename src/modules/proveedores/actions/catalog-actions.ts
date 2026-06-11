@@ -524,7 +524,8 @@ function buildSupplierCatalogSignature(item: {
  *
  * "replace" → upsert incoming rows + mark items NOT in the Excel as is_active=false.
  *             No deletion. IDs are preserved. preferred_catalog_item_id is NOT cleared.
- *             If is_active column does not exist, falls back to "update" mode silently.
+ *             If is_active column does not exist, the operation is CANCELLED with an
+ *             error — use «Actualizar catálogo» in that case.
  */
 export async function importCatalogItemsSmart(
   supplierId: string,

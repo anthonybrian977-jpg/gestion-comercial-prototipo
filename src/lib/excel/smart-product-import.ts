@@ -95,19 +95,39 @@ export function normKey(s: string): string {
 
 /**
  * Parse a cell value to a number.
- * Accepts comma-decimal notation ("1.250,50" → 1250.50) and plain "1250.50".
+ * Handles standard decimals ("12.50"), European format ("1.250,50" → 1250.50),
+ * and comma-thousands ("1,250.50" → 1250.50).
  * Returns undefined for blank / non-numeric values.
  */
 export function safeNum(v: unknown): number | undefined {
   if (v === undefined || v === null || v === "") return undefined;
   const raw = String(v).trim();
   if (raw === "") return undefined;
-  // Try comma-as-thousands + period-as-decimal: "1.250,50" → "1250.50"
-  const n1 = Number(raw.replace(/\./g, "").replace(",", "."));
-  if (!isNaN(n1)) return n1;
-  // Try period-as-thousands + comma-as-decimal (European): "1,250.50"
-  const n2 = Number(raw.replace(/,/g, ""));
-  if (!isNaN(n2)) return n2;
+
+  // Direct parse first — handles "12.50", "1250", "0.99", integers, etc.
+  const direct = Number(raw);
+  if (!isNaN(direct)) return direct;
+
+  // Both separators present: determine which is thousands vs decimal by position
+  const lastDot = raw.lastIndexOf(".");
+  const lastComma = raw.lastIndexOf(",");
+
+  if (lastDot !== -1 && lastComma !== -1) {
+    if (lastComma > lastDot) {
+      // "1.250,50" → period = thousands separator, comma = decimal
+      const n = Number(raw.replace(/\./g, "").replace(",", "."));
+      if (!isNaN(n)) return n;
+    } else {
+      // "1,250.50" → comma = thousands separator, period = decimal
+      const n = Number(raw.replace(/,/g, ""));
+      if (!isNaN(n)) return n;
+    }
+  } else if (lastComma !== -1) {
+    // "12,50" → European decimal notation (comma as decimal separator)
+    const n = Number(raw.replace(",", "."));
+    if (!isNaN(n)) return n;
+  }
+
   return undefined;
 }
 

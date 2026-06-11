@@ -72,6 +72,10 @@ export function ImportToMasterModal({
 
           {/* Body */}
           <div className="px-6 py-5">
+            <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2.5 text-xs text-amber-700 ring-1 ring-amber-100">
+              <strong>Alta manual</strong> — crea el producto directamente sin pasar por una Orden de Compra.
+              Para el flujo estándar con trazabilidad de compra, usa <strong>Órdenes de Compra</strong>.
+            </div>
             <p className="mb-4 text-xs text-slate-500 leading-relaxed">
               Se creará un nuevo producto y variante en el Maestro usando los datos del proveedor. Completa los campos faltantes.
             </p>

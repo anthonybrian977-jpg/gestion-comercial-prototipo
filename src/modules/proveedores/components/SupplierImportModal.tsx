@@ -244,13 +244,14 @@ export function SupplierImportModal({
 
           {/* Replace warning */}
           {products && importMode === "replace" && !result && (
-            <div className="flex items-start gap-2 rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700 ring-1 ring-rose-100">
+            <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-700 ring-1 ring-amber-100">
               <span className="mt-px shrink-0">⚠️</span>
               <span>
-                <strong>Modo Reemplazar:</strong> se eliminarán{" "}
-                <strong>todos</strong> los productos actuales del catálogo de este
-                proveedor y se cargarán los del archivo. Las variantes que tenían
-                este catálogo como proveedor elegido quedarán sin elección.
+                <strong>Modo Reemplazar:</strong> los ítems que{" "}
+                <strong>no estén en el Excel</strong> serán{" "}
+                <strong>desactivados</strong> (no eliminados — sus IDs e historial
+                se conservan). Los ítems del Excel serán actualizados o creados
+                con normalidad.
               </span>
             </div>
           )}
