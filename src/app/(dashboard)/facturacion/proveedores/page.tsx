@@ -18,7 +18,7 @@ function TabBar({ activeTab }: { activeTab: string }) {
       {tabs.map((t) => (
         <Link
           key={t.key}
-          href={t.key === "pendientes" ? "/facturacion/proveedores" : `?tab=${t.key}`}
+          href={t.key === "pendientes" ? "/facturacion/proveedores" : `/facturacion/proveedores?tab=${t.key}`}
           className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
             activeTab === t.key
               ? "bg-white text-slate-900 shadow-sm"

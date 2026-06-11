@@ -73,10 +73,14 @@ export async function createSupplierInvoice(
     .maybeSingle();
 
   if (existing) {
-    const e = existing as { invoice_number: string };
+    // Devolvemos invoiceId para que el cliente redirija al detalle existente
+    // sin crear un duplicado ni mostrar solo un mensaje de error.
+    const e = existing as { id: string; invoice_number: string };
     return {
       success: false,
       message: `Este recibo ya tiene la factura ${e.invoice_number} asociada.`,
+      invoiceId: e.id,
+      invoiceNumber: e.invoice_number,
     };
   }
 

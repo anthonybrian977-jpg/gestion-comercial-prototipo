@@ -25,12 +25,18 @@ export function ReceiptsForInvoicingTable({
     setLoadingId(receiptId);
     startTransition(async () => {
       const result = await createSupplierInvoice(receiptId);
-      if (result.success && result.invoiceId) {
+
+      if (result.invoiceId) {
+        // Tanto en creación nueva como en duplicado detectado:
+        // redirigir al detalle de la factura (nueva o ya existente).
+        // Nunca se crean dos facturas para el mismo recibo.
         router.push(`/facturacion/proveedores/${result.invoiceId}`);
-      } else {
-        setError(result.message);
-        setLoadingId(null);
+        return;
       }
+
+      // Error real (recibo no existe, fallo de BD, etc.)
+      setError(result.message);
+      setLoadingId(null);
     });
   }
 

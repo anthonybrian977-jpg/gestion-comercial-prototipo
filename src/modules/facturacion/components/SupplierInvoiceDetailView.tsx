@@ -237,16 +237,16 @@ export function SupplierInvoiceDetailView({
       {/* ── Navegación ───────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-6 py-4 shadow-sm">
         <Link
-          href="/facturacion/proveedores"
+          href="/facturacion/proveedores?tab=historial"
           className="text-xs text-slate-500 hover:text-cyan-700 hover:underline"
         >
-          ← Volver a Facturas de Proveedor
+          ← Volver al historial
         </Link>
         <Link
           href={`/ingreso-mercaderia/historial/${invoice.goods_receipt_id}`}
           className="text-xs text-slate-500 hover:text-cyan-700 hover:underline"
         >
-          Ver recibo {invoice.receipt_number} →
+          Ver ingreso {invoice.receipt_number} →
         </Link>
       </div>
 
