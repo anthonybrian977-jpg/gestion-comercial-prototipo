@@ -136,11 +136,18 @@ export async function saveDraftPurchaseOrder(
     }
     orderId = payload.orderId;
 
-    // Eliminar ítems anteriores y reemplazar
-    await supabase
+    // Eliminar ítems anteriores y reemplazar — abortar si falla
+    const { error: deleteErr } = await supabase
       .from("purchase_order_items")
       .delete()
       .eq("purchase_order_id", orderId);
+
+    if (deleteErr) {
+      return {
+        success: false,
+        message: "Error al limpiar los ítems anteriores: " + deleteErr.message,
+      };
+    }
 
   } else {
     // Crear nueva OC
@@ -336,6 +343,16 @@ export async function issuePurchaseOrder(
       .eq("id", item.id);
   }
 
+  // ── Si hubo errores en ítems, NO emitir — dejar en draft ─────────────────
+  if (errors.length > 0) {
+    return {
+      success: false,
+      message:
+        "No se pudo emitir la orden porque algunos ítems no pudieron vincularse al Maestro. La orden sigue como borrador.",
+      errors,
+    };
+  }
+
   // ── Actualizar estado de la OC ────────────────────────────────────────────
   const { error: statusErr } = await supabase
     .from("purchase_orders")
@@ -353,14 +370,6 @@ export async function issuePurchaseOrder(
   }
 
   revalidateOCPaths(orderId);
-
-  if (errors.length > 0) {
-    return {
-      success: true,
-      message: `Orden "${order.order_number}" emitida con ${errors.length} advertencia(s).`,
-      errors,
-    };
-  }
 
   return {
     success: true,
